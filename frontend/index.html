@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Particle Life Sandbox</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="canvas-panel">
+        <header>
+          <h1>Particle Life Sandbox</h1>
+          <div class="status" id="connection-status">Connecting…</div>
+        </header>
+        <canvas id="simulation-canvas" width="800" height="600"></canvas>
+      </section>
+      <section class="control-panel">
+        <h2>Simulation Controls</h2>
+        <div class="panel-row">
+          <label for="species-input">Species</label>
+          <input id="species-input" type="number" min="1" step="1" />
+          <label for="particle-input">Particles</label>
+          <input id="particle-input" type="number" min="1" step="10" />
+        </div>
+        <div class="panel-row">
+          <button id="apply-settings" type="button">Apply Settings</button>
+          <button id="reset-config" type="button">Reset Simulation</button>
+        </div>
+        <div class="panel-row">
+          <label for="preset-select">Preset</label>
+          <select id="preset-select"></select>
+          <button id="apply-preset" type="button">Apply</button>
+        </div>
+        <h2>Interaction Matrix</h2>
+        <div class="matrix-wrapper">
+          <table id="matrix-table" class="matrix-table"></table>
+        </div>
+        <details>
+          <summary>Simulation Stats</summary>
+          <ul id="stats-list"></ul>
+        </details>
+      </section>
+    </main>
+    <script src="/static/main.js" type="module"></script>
+  </body>
+</html>
