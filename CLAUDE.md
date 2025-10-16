@@ -1,10 +1,10 @@
-# AGENT.md — Particle Life Sandbox (Python backend)
+# CLAUDE.md — Particle Life Sandbox (Python backend)
 
 > Build a **clean, minimal, extensible** Particle Life sandbox I can play with, with a **side-panel matrix editor** (editable interaction matrix for all species) and a **bounded workspace** where particles **reflect** on collision with the boundary. Keep architecture simple, avoid over-engineering (e.g., no unnecessary class hierarchies, no blanket `try/except` scaffolding).
 
 ---
 
-## 1) Mission & Outcomes
+## 1) Mission & Outcomess
 
 **Mission**
 - Implement a 2D Particle Life playground with a Python backend and a lightweight web UI.
