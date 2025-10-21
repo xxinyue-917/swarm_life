@@ -23,6 +23,17 @@ let matrixInputs = [];
 let pendingConfig = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Add debugging
+  if (!canvas) {
+    console.error("Canvas element not found!");
+    return;
+  }
+  if (!ctx) {
+    console.error("Canvas context not found!");
+    return;
+  }
+  console.log("Canvas initialized:", canvas.width, "x", canvas.height);
+
   await loadConfig();
   await loadPresets();
   setupControls();
@@ -53,18 +64,21 @@ function setupControls() {
 }
 
 async function loadConfig() {
-  const response = await fetch("/config");
-  if (!response.ok) {
+  try {
+    const response = await fetch("/config");
+    if (!response.ok) {
+      setStatus("Failed to load config");
+      return;
+    }
+    const data = await response.json();
+    state.config = data.config;
+    state.matrix = data.matrix;
+    // Don't do UI updates here - wait for WebSocket data
+    resizeCanvas(); // Just set canvas size
+  } catch (error) {
+    console.error("Failed to load config:", error);
     setStatus("Failed to load config");
-    return;
   }
-  const data = await response.json();
-  state.config = data.config;
-  state.matrix = data.matrix;
-  resizeCanvas();
-  populateConfigControls();
-  buildMatrixEditor();
-  updateStats();
 }
 
 async function loadPresets() {
@@ -81,11 +95,9 @@ async function loadPresets() {
 }
 
 function resizeCanvas() {
-  if (!state.config) {
-    return;
-  }
-  canvas.width = state.config.width;
-  canvas.height = state.config.height;
+  // Always use fixed dimensions
+  canvas.width = 800;
+  canvas.height = 600;
 }
 
 function populateConfigControls() {
@@ -199,13 +211,22 @@ function connect() {
   socket.addEventListener("message", onMessage);
 }
 
+let lastConfigUpdate = 0;
+let frameCount = 0;
+
 function onMessage(event) {
   const message = JSON.parse(event.data);
   if (message.type === "state") {
     const payload = message.payload;
     state.particles = payload.particles;
+
+    // Check if config/matrix changed
+    const configChanged = JSON.stringify(state.config) !== JSON.stringify(payload.config);
+    const matrixChanged = JSON.stringify(state.matrix) !== JSON.stringify(payload.matrix);
+
     state.matrix = payload.matrix;
     state.config = payload.config;
+
     if (
       pendingConfig &&
       state.config.species_count === pendingConfig.species &&
@@ -213,11 +234,18 @@ function onMessage(event) {
     ) {
       pendingConfig = null;
     }
-    resizeCanvas();
-    populateConfigControls();
-    refreshMatrixEditor();
+
+    // Only update UI when config/matrix changes or every 30 frames (~1 second)
+    frameCount++;
+    if (configChanged || matrixChanged || frameCount % 30 === 0) {
+      resizeCanvas();
+      populateConfigControls();
+      refreshMatrixEditor();
+      updateStats();
+    }
+
+    // Always render particles
     render();
-    updateStats();
     return;
   }
   if (message.type === "error") {
@@ -257,17 +285,36 @@ function refreshMatrixEditor() {
 }
 
 function render() {
-  if (!state.config) {
+  if (!state.particles || state.particles.length === 0) {
+    console.log("No particles to render");
     return;
   }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const radius = Math.max(1.5, Math.min(3.5, state.config.interaction_radius * 0.08));
+
+  // Make sure canvas has correct dimensions
+  if (canvas.width !== 800 || canvas.height !== 600) {
+    canvas.width = 800;
+    canvas.height = 600;
+  }
+
+  // Clear with a dark background to see if canvas is working
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Use a larger, fixed radius for better visibility
+  const radius = 5;
+  let rendered = 0;
   for (const particle of state.particles) {
     const color = getSpeciesColor(particle.species);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
     ctx.fill();
+    rendered++;
+  }
+
+  // Log first render
+  if (frameCount === 1) {
+    console.log(`Rendered ${rendered} particles. First particle at (${state.particles[0].x}, ${state.particles[0].y})`);
   }
 }
 

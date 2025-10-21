@@ -139,3 +139,60 @@ details ul {
   margin: 0.5rem 0 0;
   padding-left: 1rem;
 }
+
+/* Swarm Mode Styles */
+.swarm-hud {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 1rem;
+  background: #f8f8f8;
+  margin-top: 1rem;
+}
+
+.swarm-hud h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.metric-row:last-child {
+  border-bottom: none;
+}
+
+.metric-label {
+  font-weight: 500;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.metric-value {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-weight: 600;
+  color: #2563eb;
+  font-size: 0.9rem;
+}
+
+#fsm-state {
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* Mode buttons */
+#classic-mode-btn.active,
+#swarm-mode-btn.active {
+  background: #2563eb;
+  color: white;
+  border-color: #1d4ed8;
+}
