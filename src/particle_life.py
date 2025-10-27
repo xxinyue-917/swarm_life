@@ -14,16 +14,16 @@ import math
 @dataclass
 class Config:
     """Simulation configuration"""
-    width: int = 200
-    height: int = 200
+    width: int = 500
+    height: int = 500
     n_species: int = 2
-    n_particles: int = 20
+    n_particles: int = 100
     dt: float = 0.05
     damping: float = 0.995
     max_speed: float = 300.0
     r_rep: float = 5.0
-    r_att: float = 50.0
-    r_cut: float = 100.0
+    r_att: float = 500.0
+    r_cut: float = 500.0
     a_rep: float = 5.0
     a_att: float = 2.0
     seed: int = 42
@@ -417,28 +417,22 @@ class ParticleLife:
             y = int(pos[1] * self.zoom)
 
             if self.show_orientations:
-                # Draw as oriented triangle (scaled with zoom)
+                # Draw as circle with orientation line (scaled with zoom)
                 angle = self.orientations[i]
-                size = 6 * self.zoom  # Scale size with zoom
+                radius = 5 * self.zoom  # Circle radius scaled with zoom
 
-                # Calculate triangle points
-                front_x = x + size * np.cos(angle)
-                front_y = y + size * np.sin(angle)
+                # Draw circle
+                pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
 
-                left_angle = angle + 2.5
-                left_x = x + size * 0.7 * np.cos(left_angle)
-                left_y = y + size * 0.7 * np.sin(left_angle)
+                # Draw orientation line inside the circle
+                # Line length is 80% of radius to keep it inside
+                line_length = radius * 0.8
+                end_x = x + line_length * np.cos(angle)
+                end_y = y + line_length * np.sin(angle)
 
-                right_angle = angle - 2.5
-                right_x = x + size * 0.7 * np.cos(right_angle)
-                right_y = y + size * 0.7 * np.sin(right_angle)
-
-                # Draw triangle
-                points = [(front_x, front_y), (left_x, left_y), (right_x, right_y)]
-                pygame.draw.polygon(self.screen, color, points)
-
-                # Draw small circle at center (scaled)
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(2 * self.zoom)))
+                # Draw black orientation line (thickness scales with zoom)
+                line_thickness = max(1, int(self.zoom))
+                pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y), line_thickness)
             else:
                 # Draw as simple circle (scaled)
                 pygame.draw.circle(self.screen, color, (x, y), max(1, int(4 * self.zoom)))
