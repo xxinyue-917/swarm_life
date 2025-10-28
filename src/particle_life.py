@@ -312,40 +312,38 @@ class ParticleLife:
                 r = dist[j]
                 dx, dy = delta[j]
 
-                # Species interaction matrices
-                si = self.species[i]
-                sj = self.species[j]
-                k_pos = self.matrix[si, sj]  # Position interaction
-                k_rot = self.alignment_matrix[si, sj]  # Rotation interaction
+                # species lookups
+                si = self.species[i]; sj = self.species[j]
+                k_pos = self.matrix[si, sj]              # K^v
+                k_rot = self.alignment_matrix[si, sj]    # K^ω
 
-                # Linear velocity contribution
-                # Attraction/repulsion part
-                if r < self.config.r_rep:
-                    # Strong repulsion when too close
-                    repulsion = -self.config.a_rep * (1 - r / self.config.r_rep)
-                    velocity_sum[0] += repulsion * dx / r
-                    velocity_sum[1] += repulsion * dy / r
-                else:
-                    # Attraction based on position matrix
-                    attraction = k_pos * self.config.a_att * (1 - r / self.config.r_cut)
-                    velocity_sum[0] += attraction * dx / r
-                    velocity_sum[1] += attraction * dy / r
+                # ---- unit directions ----
+                inv_r = 1.0 / (r + 1e-8)
+                r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
+                t_hat_x, t_hat_y = -dy * inv_r, dx * inv_r   # 逆时针90°；ω>0 => 逆时针绕
 
-                # Rotation coupling to linear velocity
-                # k_rot * neighbor's angular velocity / max angular velocity * dist_vector / dist^3
-                if r > 0.1:  # Avoid division issues
-                    angular_coupling = k_rot * (self.angular_velocities[j] / self.config.max_angular_speed) * 10.0  # Scale up for visibility
-                    velocity_sum[0] += angular_coupling * dx / (r * r)
-                    velocity_sum[1] += angular_coupling * dy / (r * r)
+                # ---- radial part: attraction - repulsion (along r̂) ----
+                attraction = k_pos * self.config.a_att
+                repulsion  = self.config.a_rep / np.sqrt(r + 1e-6)   # 防止0除
+                radial_mag = attraction - repulsion
+                velocity_sum[0] += radial_mag * r_hat_x
+                velocity_sum[1] += radial_mag * r_hat_y
 
-                # Angular velocity contribution
-                # k_rot * (angular_velocity_j - angular_velocity_i) / dist
-                angular_diff = self.angular_velocities[j] - self.angular_velocities[i]
-                angular_vel_sum += 0.1 + k_rot * angular_diff / r
+                # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
+                omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
+                                    -1.0, 1.0)
+                swirl_gain = 10 * k_rot * omega_norm * (1.0 / (r + 1e-6))
+
+                velocity_sum[0] += swirl_gain * t_hat_x
+                velocity_sum[1] += swirl_gain * t_hat_y
+
+
 
             # Set new velocities
             new_velocities[i] = velocity_sum
-            new_angular_velocities[i] = angular_vel_sum / len(neighbors)
+            # new_angular_velocities[i] = angular_vel_sum / len(neighbors)
+            # Currently just use simple natural frequency for angular velocity
+            new_angular_velocities[i] = 5  # Natural frequency
 
         return new_velocities, new_angular_velocities
 
