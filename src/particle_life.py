@@ -39,28 +39,15 @@ class ParticleLife:
         self.n = config.n_particles
         self.n_species = config.n_species
 
-        # Positions - initialize in confined center space
-        self.positions = self.rng.uniform(
-            [(config.width / 2) - config.init_space_size, (config.height / 2) - config.init_space_size],
-            [(config.width / 2) + config.init_space_size, (config.height / 2) + config.init_space_size],
-            (self.n, 2)
-        )
-        # Start with zero velocity
-        self.velocities = np.zeros((self.n, 2))
-
-        # Orientations and angular velocities
-        self.orientations = self.rng.uniform(0, 2 * np.pi, self.n)
-        self.angular_velocities = self.rng.randn(self.n) * 0.1
-
-        # Species assignment
-        self.species = self.rng.randint(0, self.n_species, self.n)
+        # Colors for species
+        self.colors = self.generate_colors(self.n_species)
 
         # Interaction matrices
         self.matrix = self.generate_matrix("chaos")  # Position attraction/repulsion matrix
         self.alignment_matrix = self.generate_matrix("symbiosis")  # Orientation alignment matrix
 
-        # Colors for species
-        self.colors = self.generate_colors(self.n_species)
+        # Initialize all particle states
+        self.initialize_particles()
 
         # Pygame setup
         pygame.init()
@@ -93,6 +80,47 @@ class ParticleLife:
             rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
             colors.append(tuple(int(c * 255) for c in rgb))
         return colors
+
+    def initialize_particles(self, count=None, reset_all=True):
+        """
+        Initialize particle states with consistent spawn pattern.
+
+        Args:
+            count: Number of particles to initialize (None = use self.n)
+            reset_all: If True, reset all particles. If False, return new arrays for appending.
+
+        Returns:
+            If reset_all=False, returns tuple of (positions, velocities, orientations, angular_velocities, species)
+        """
+        if count is None:
+            count = self.n
+
+        # Calculate spawn area (center of workspace)
+        center_x = self.config.width / 2
+        center_y = self.config.height / 2
+
+        # Generate initial states
+        positions = self.rng.uniform(
+            [center_x - self.config.init_space_size, center_y - self.config.init_space_size],
+            [center_x + self.config.init_space_size, center_y + self.config.init_space_size],
+            (count, 2)
+        )
+        velocities = np.zeros((count, 2))  # Start with zero velocity
+        orientations = self.rng.uniform(0, 2 * np.pi, count)
+        angular_velocities = self.rng.randn(count) * 0.1
+        species = self.rng.randint(0, self.n_species, count)
+
+        if reset_all:
+            # Full reset: replace all particle states
+            self.n = count
+            self.positions = positions
+            self.velocities = velocities
+            self.orientations = orientations
+            self.angular_velocities = angular_velocities
+            self.species = species
+        else:
+            # Partial: return new arrays for appending
+            return positions, velocities, orientations, angular_velocities, species
 
     def generate_matrix(self, preset: str) -> np.ndarray:
         """Generate interaction matrix based on preset"""
@@ -144,11 +172,10 @@ class ParticleLife:
         self.matrix = self.generate_matrix(self.selected_preset)
         self.alignment_matrix = self.generate_matrix("symbiosis")
 
-        # Reassign particles to species (keeping existing assignments where possible)
-        for i in range(self.n):
-            if self.species[i] >= self.n_species:
-                # Reassign particles that are now out of range
-                self.species[i] = self.rng.randint(0, self.n_species)
+        # Reset all particles with new species distribution
+        self.initialize_particles()
+
+        print(f"Reset simulation with {self.n_species} species")
 
     def change_particle_count(self, delta: int):
         """Change the number of particles by delta"""
@@ -161,18 +188,11 @@ class ParticleLife:
         if new_count > self.n:
             # Add new particles
             num_new = new_count - self.n
-            center_x = self.config.width / 2
-            center_y = self.config.height / 2
-            new_positions = self.rng.uniform(
-                [center_x - self.config.init_space_size, center_y - self.config.init_space_size],
-                [center_x + self.config.init_space_size, center_y + self.config.init_space_size],
-                (num_new, 2)
-            )
-            new_velocities = np.zeros((num_new, 2))  # Start with zero velocity
-            new_orientations = self.rng.uniform(0, 2 * np.pi, num_new)
-            new_angular_velocities = self.rng.randn(num_new) * 0.1
-            new_species = self.rng.randint(0, self.n_species, num_new)
+            # Generate new particle states
+            new_positions, new_velocities, new_orientations, new_angular_velocities, new_species = \
+                self.initialize_particles(count=num_new, reset_all=False)
 
+            # Append to existing arrays
             self.positions = np.vstack([self.positions, new_positions])
             self.velocities = np.vstack([self.velocities, new_velocities])
             self.orientations = np.concatenate([self.orientations, new_orientations])
@@ -306,7 +326,6 @@ class ParticleLife:
             #     continue
 
             velocity_sum = np.zeros(2)
-            angular_vel_sum = 0.0
 
             for j in range(self.n):
                 if j == i:
@@ -449,6 +468,7 @@ class ParticleLife:
             f"Particles: {self.n} (50-2000)",
             f"Species: {self.n_species} (2-10)",
             f"Preset: {self.selected_preset}",
+            f"Active Matrix: {'POSITION' if self.current_matrix == 'position' else 'ORIENTATION'}",
             "",
             "Controls:",
             "F11/F - Toggle fullscreen",
@@ -496,20 +516,22 @@ class ParticleLife:
         """Draw the interaction matrix for editing"""
         # Matrix position on screen
         matrix_x = self.config.width - 350
-        matrix_y = 50
+        matrix_y = 100  # Moved down from 50
         cell_size = 40
 
         # Select which matrix to display
         if self.current_matrix == "position":
             matrix = self.matrix
-            matrix_name = "Position Matrix"
+            matrix_name = "POSITION MATRIX (K_pos)"
+            title_color = (100, 255, 100)  # Green for position
         else:
             matrix = self.alignment_matrix
-            matrix_name = "Orientation Matrix"
+            matrix_name = "ORIENTATION MATRIX (K_rot)"
+            title_color = (100, 150, 255)  # Blue for orientation
 
         # Title
-        title = self.font.render(matrix_name, True, (255, 255, 255))
-        self.screen.blit(title, (matrix_x, matrix_y - 30))
+        title = self.font.render(matrix_name, True, title_color)
+        self.screen.blit(title, (matrix_x, matrix_y - 45))  # Moved up from -30
 
         # Draw species labels and matrix
         for i in range(self.n_species):
@@ -554,9 +576,10 @@ class ParticleLife:
 
         # Instructions
         instructions = [
-            "WASD: Navigate",
+            "TAB: Switch matrix",
+            "WASD: Navigate cells",
             "+/-: Change value",
-            "M: Hide matrix"
+            "M: Hide matrix editor"
         ]
         y_offset = matrix_y + (self.n_species + 1) * cell_size
         for i, instruction in enumerate(instructions):
@@ -641,17 +664,9 @@ class ParticleLife:
                     self.paused = not self.paused
 
                 elif event.key == pygame.K_r:
-                    # Reset positions and orientations
-                    center_x = self.config.width / 2
-                    center_y = self.config.height / 2
-                    self.positions = self.rng.uniform(
-                        [center_x - self.config.init_space_size, center_y - self.config.init_space_size],
-                        [center_x + self.config.init_space_size, center_y + self.config.init_space_size],
-                        (self.n, 2)
-                    )
-                    self.velocities = np.zeros((self.n, 2))  # Start with zero velocity
-                    self.orientations = self.rng.uniform(0, 2 * np.pi, self.n)
-                    self.angular_velocities = self.rng.randn(self.n) * 0.1
+                    # Reset all particles to initial state
+                    self.initialize_particles()
+                    print("Reset particles to initial state")
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
