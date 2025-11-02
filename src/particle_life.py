@@ -14,23 +14,19 @@ import math
 @dataclass
 class Config:
     """Simulation configuration"""
-    width: int = 500
-    height: int = 500
+    width: int = 1000
+    height: int = 1000
+    init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
     n_species: int = 2
     n_particles: int = 100
     dt: float = 0.05
-    damping: float = 0.995
     max_speed: float = 300.0
-    r_rep: float = 5.0
-    r_att: float = 500.0
     r_cut: float = 500.0
     a_rep: float = 5.0
     a_att: float = 2.0
     seed: int = 42
-    angular_damping: float = 0.98  # Damping for angular velocity
     max_angular_speed: float = 5.0  # Max angular velocity (radians/sec)
     alignment_strength: float = 0.5  # Strength of orientation alignment
-    blend_factor: float = 0.15  # Blending factor for velocity updates (0-1)
 
 class ParticleLife:
     """Main particle life simulation"""
@@ -43,13 +39,14 @@ class ParticleLife:
         self.n = config.n_particles
         self.n_species = config.n_species
 
-        # Positions and velocities
+        # Positions - initialize in confined center space
         self.positions = self.rng.uniform(
-            [50, 50],
-            [config.width - 50, config.height - 50],
+            [(config.width / 2) - config.init_space_size, (config.height / 2) - config.init_space_size],
+            [(config.width / 2) + config.init_space_size, (config.height / 2) + config.init_space_size],
             (self.n, 2)
         )
-        self.velocities = self.rng.randn(self.n, 2) * 10
+        # Start with zero velocity
+        self.velocities = np.zeros((self.n, 2))
 
         # Orientations and angular velocities
         self.orientations = self.rng.uniform(0, 2 * np.pi, self.n)
@@ -164,12 +161,14 @@ class ParticleLife:
         if new_count > self.n:
             # Add new particles
             num_new = new_count - self.n
+            center_x = self.config.width / 2
+            center_y = self.config.height / 2
             new_positions = self.rng.uniform(
-                [50, 50],
-                [self.config.width - 50, self.config.height - 50],
+                [center_x - self.config.init_space_size, center_y - self.config.init_space_size],
+                [center_x + self.config.init_space_size, center_y + self.config.init_space_size],
                 (num_new, 2)
             )
-            new_velocities = self.rng.randn(num_new, 2) * 10
+            new_velocities = np.zeros((num_new, 2))  # Start with zero velocity
             new_orientations = self.rng.uniform(0, 2 * np.pi, num_new)
             new_angular_velocities = self.rng.randn(num_new) * 0.1
             new_species = self.rng.randint(0, self.n_species, num_new)
@@ -300,15 +299,18 @@ class ParticleLife:
             dist[i] = np.inf  # Avoid self-interaction
 
             # Find neighbors within cutoff
-            neighbors = np.where(dist < self.config.r_cut)[0]
+            # neighbors = np.where(dist < self.config.r_cut)[0]
 
-            if len(neighbors) == 0:
-                continue
+
+            # if len(neighbors) == 0:
+            #     continue
 
             velocity_sum = np.zeros(2)
             angular_vel_sum = 0.0
 
-            for j in neighbors:
+            for j in range(self.n):
+                if j == i:
+                    continue  # Skip self-interaction
                 r = dist[j]
                 dx, dy = delta[j]
 
@@ -320,11 +322,11 @@ class ParticleLife:
                 # ---- unit directions ----
                 inv_r = 1.0 / (r + 1e-8)
                 r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
-                t_hat_x, t_hat_y = -dy * inv_r, dx * inv_r   # 逆时针90°；ω>0 => 逆时针绕
+                t_hat_x, t_hat_y = -dy * inv_r, dx * inv_r
 
                 # ---- radial part: attraction - repulsion (along r̂) ----
                 attraction = k_pos * self.config.a_att
-                repulsion  = self.config.a_rep / np.sqrt(r + 1e-6)   # 防止0除
+                repulsion  = self.config.a_rep / np.sqrt(r + 1e-6)
                 radial_mag = attraction - repulsion
                 velocity_sum[0] += radial_mag * r_hat_x
                 velocity_sum[1] += radial_mag * r_hat_y
@@ -356,14 +358,10 @@ class ParticleLife:
         new_velocities, new_angular_velocities = self.compute_velocities()
 
         # Blend with current velocities for smoothness
-        self.velocities = self.config.blend_factor * new_velocities + (1 - self.config.blend_factor) * self.velocities
+        self.velocities = new_velocities
 
         # Blend angular velocities for smoother rotation
-        self.angular_velocities = 0.3 * new_angular_velocities + 0.7 * self.angular_velocities
-
-        # Apply damping for stability
-        self.velocities *= self.config.damping
-        self.angular_velocities *= self.config.angular_damping
+        self.angular_velocities = new_angular_velocities
 
         # Clamp linear speed
         speed = np.linalg.norm(self.velocities, axis=1, keepdims=True)
@@ -644,12 +642,14 @@ class ParticleLife:
 
                 elif event.key == pygame.K_r:
                     # Reset positions and orientations
+                    center_x = self.config.width / 2
+                    center_y = self.config.height / 2
                     self.positions = self.rng.uniform(
-                        [50, 50],
-                        [self.config.width - 50, self.config.height - 50],
+                        [center_x - self.config.init_space_size, center_y - self.config.init_space_size],
+                        [center_x + self.config.init_space_size, center_y + self.config.init_space_size],
                         (self.n, 2)
                     )
-                    self.velocities = self.rng.randn(self.n, 2) * 10
+                    self.velocities = np.zeros((self.n, 2))  # Start with zero velocity
                     self.orientations = self.rng.uniform(0, 2 * np.pi, self.n)
                     self.angular_velocities = self.rng.randn(self.n) * 0.1
 
