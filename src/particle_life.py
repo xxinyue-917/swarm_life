@@ -162,7 +162,22 @@ class ParticleLife:
         velocities = np.zeros((count, 2))  # Start with zero velocity
         orientations = self.rng.uniform(0, 2 * np.pi, count)
         angular_velocities = self.rng.randn(count) * 0.1
-        species = self.rng.randint(0, self.n_species, count)
+
+        # Equal distribution of species
+        species = np.zeros(count, dtype=int)
+        particles_per_species = count // self.n_species
+        remainder = count % self.n_species
+
+        # Assign particles to species equally
+        idx = 0
+        for s in range(self.n_species):
+            # Give this species its share, plus one extra if there's remainder
+            n_for_this_species = particles_per_species + (1 if s < remainder else 0)
+            species[idx:idx + n_for_this_species] = s
+            idx += n_for_this_species
+
+        # Shuffle the species assignments to mix them spatially
+        self.rng.shuffle(species)
 
         if reset_all:
             # Full reset: replace all particle states
@@ -222,7 +237,9 @@ class ParticleLife:
         # Reset all particles with new species distribution
         self.initialize_particles()
 
-        print(f"Reset simulation with {self.n_species} species")
+        # Show distribution info
+        counts = [np.sum(self.species == s) for s in range(self.n_species)]
+        print(f"Reset simulation with {self.n_species} species (distribution: {counts})")
 
     def change_particle_count(self, delta: int):
         """Change the number of particles by delta"""
@@ -232,29 +249,14 @@ class ParticleLife:
         if new_count == self.n:
             return
 
-        if new_count > self.n:
-            # Add new particles
-            num_new = new_count - self.n
-            # Generate new particle states
-            new_positions, new_velocities, new_orientations, new_angular_velocities, new_species = \
-                self.initialize_particles(count=num_new, reset_all=False)
-
-            # Append to existing arrays
-            self.positions = np.vstack([self.positions, new_positions])
-            self.velocities = np.vstack([self.velocities, new_velocities])
-            self.orientations = np.concatenate([self.orientations, new_orientations])
-            self.angular_velocities = np.concatenate([self.angular_velocities, new_angular_velocities])
-            self.species = np.concatenate([self.species, new_species])
-        else:
-            # Remove particles
-            self.positions = self.positions[:new_count]
-            self.velocities = self.velocities[:new_count]
-            self.orientations = self.orientations[:new_count]
-            self.angular_velocities = self.angular_velocities[:new_count]
-            self.species = self.species[:new_count]
-
+        # For equal distribution, it's easier to regenerate all particles
+        # This ensures perfect balance across species
         self.n = new_count
-        print(f"Particle count: {self.n}")
+        self.initialize_particles()
+
+        # Show distribution info
+        counts = [np.sum(self.species == s) for s in range(self.n_species)]
+        print(f"Particle count: {self.n} (distribution: {counts})")
 
     def change_workspace_size(self, width_delta: int = 0, height_delta: int = 0):
         """Change the workspace size"""
