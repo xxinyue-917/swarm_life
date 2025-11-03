@@ -6,10 +6,14 @@ Interactive particle simulation with real-time parameter adjustment
 
 import pygame
 import numpy as np
-from dataclasses import dataclass
-from typing import List, Tuple
+from dataclasses import dataclass, field, asdict
+from typing import List, Tuple, Optional
 import colorsys
 import math
+import json
+import argparse
+import os
+from datetime import datetime
 
 @dataclass
 class Config:
@@ -18,15 +22,53 @@ class Config:
     height: int = 1000
     init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
     n_species: int = 2
-    n_particles: int = 100
+    n_particles: int = 90
     dt: float = 0.05
     max_speed: float = 300.0
-    r_cut: float = 500.0
     a_rep: float = 5.0
     a_att: float = 2.0
     seed: int = 42
-    max_angular_speed: float = 5.0  # Max angular velocity (radians/sec)
-    alignment_strength: float = 0.5  # Strength of orientation alignment
+    max_angular_speed: float = 20.0  # Max angular velocity (radians/sec)
+    a_rot: float = 5  # Strength of orientation alignment
+    # Matrices (initialized as None, will be set during initialization)
+    position_matrix: Optional[List[List[float]]] = None
+    orientation_matrix: Optional[List[List[float]]] = None
+
+    def to_dict(self):
+        """Convert config to dictionary for JSON serialization"""
+        d = asdict(self)
+        # Convert numpy arrays to lists if they exist
+        if hasattr(self, '_position_matrix_np'):
+            d['position_matrix'] = self._position_matrix_np.tolist()
+        if hasattr(self, '_orientation_matrix_np'):
+            d['orientation_matrix'] = self._orientation_matrix_np.tolist()
+        return d
+
+    @classmethod
+    def from_dict(cls, data):
+        """Create Config from dictionary"""
+        # Extract matrices if they exist
+        pos_matrix = data.pop('position_matrix', None)
+        ori_matrix = data.pop('orientation_matrix', None)
+
+        config = cls(**data)
+        config.position_matrix = pos_matrix
+        config.orientation_matrix = ori_matrix
+        return config
+
+    def save(self, filepath):
+        """Save configuration to JSON file"""
+        os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
+        with open(filepath, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+        print(f"Configuration saved to {filepath}")
+
+    @classmethod
+    def load(cls, filepath):
+        """Load configuration from JSON file"""
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 class ParticleLife:
     """Main particle life simulation"""
@@ -42,9 +84,22 @@ class ParticleLife:
         # Colors for species
         self.colors = self.generate_colors(self.n_species)
 
-        # Interaction matrices
-        self.matrix = self.generate_matrix("chaos")  # Position attraction/repulsion matrix
-        self.alignment_matrix = self.generate_matrix("symbiosis")  # Orientation alignment matrix
+        # Initialize matrices from config or generate default
+        if config.position_matrix is not None:
+            self.matrix = np.array(config.position_matrix)
+        else:
+            # Generate default zero matrix
+            self.matrix = np.zeros((self.n_species, self.n_species))
+
+        if config.orientation_matrix is not None:
+            self.alignment_matrix = np.array(config.orientation_matrix)
+        else:
+            # Generate default zero matrix
+            self.alignment_matrix = np.zeros((self.n_species, self.n_species))
+
+        # Store matrices in config for saving
+        self.config._position_matrix_np = self.matrix
+        self.config._orientation_matrix_np = self.alignment_matrix
 
         # Initialize all particle states
         self.initialize_particles()
@@ -60,7 +115,6 @@ class ParticleLife:
         self.paused = False
         self.show_info = True
         self.show_matrix = False
-        self.selected_preset = "chaos"
         self.matrix_cursor = [0, 0]  # Row, Column for matrix editing
         self.current_matrix = "position"  # Which matrix is being edited: "position" or "orientation"
         self.show_orientations = True  # Whether to show particle orientations
@@ -122,36 +176,25 @@ class ParticleLife:
             # Partial: return new arrays for appending
             return positions, velocities, orientations, angular_velocities, species
 
-    def generate_matrix(self, preset: str) -> np.ndarray:
-        """Generate interaction matrix based on preset"""
-        if preset == "chaos":
-            # Generate chaotic matrix for any size
-            matrix = self.rng.uniform(-0.9, 0.9, (self.n_species, self.n_species))
-            np.fill_diagonal(matrix, self.rng.uniform(0.2, 0.5, self.n_species))
-            return matrix
-        elif preset == "symbiosis":
-            # Symbiotic relationships
-            matrix = np.zeros((self.n_species, self.n_species))
-            for i in range(self.n_species):
-                for j in range(self.n_species):
-                    if i == j:
-                        matrix[i, j] = 0.2  # Mild self-attraction
-                    else:
-                        matrix[i, j] = 0.6 if (i + j) % 2 == 0 else -0.4
-            return matrix
-        elif preset == "predator":
-            # Predator-prey dynamics
-            matrix = np.zeros((self.n_species, self.n_species))
-            for i in range(self.n_species):
-                j = (i + 1) % self.n_species
-                matrix[i, j] = 0.9  # Chase next species
-                matrix[j, i] = -0.8  # Flee from previous
-            return matrix
-        elif preset == "random":
-            return self.rng.uniform(-1, 1, (self.n_species, self.n_species))
-        else:
-            # Default neutral
-            return np.zeros((self.n_species, self.n_species))
+
+    def save_current_config(self):
+        """Save current configuration with timestamp"""
+        # Update config with current values
+        self.config.n_species = self.n_species
+        self.config.n_particles = self.n
+        self.config._position_matrix_np = self.matrix
+        self.config._orientation_matrix_np = self.alignment_matrix
+
+        # Create presets directory if it doesn't exist
+        os.makedirs("presets", exist_ok=True)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"presets/config_{timestamp}.json"
+
+        # Save configuration
+        self.config.save(filename)
+        return filename
 
     def change_species_count(self, delta: int):
         """Change the number of species by delta"""
@@ -168,9 +211,13 @@ class ParticleLife:
         # Regenerate colors
         self.colors = self.generate_colors(self.n_species)
 
-        # Regenerate matrices for new species count
-        self.matrix = self.generate_matrix(self.selected_preset)
-        self.alignment_matrix = self.generate_matrix("symbiosis")
+        # Regenerate matrices for new species count (start with zeros)
+        self.matrix = np.zeros((self.n_species, self.n_species))
+        self.alignment_matrix = np.zeros((self.n_species, self.n_species))
+
+        # Update config with new matrices
+        self.config._position_matrix_np = self.matrix
+        self.config._orientation_matrix_np = self.alignment_matrix
 
         # Reset all particles with new species distribution
         self.initialize_particles()
@@ -353,7 +400,7 @@ class ParticleLife:
                 # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
                 omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
                                     -1.0, 1.0)
-                swirl_gain = 10 * k_rot * omega_norm * (1.0 / (r + 1e-6))
+                swirl_gain = - 10 * k_rot * omega_norm * (self.config.a_rot / (r + 1e-6))
 
                 velocity_sum[0] += swirl_gain * t_hat_x
                 velocity_sum[1] += swirl_gain * t_hat_y
@@ -467,7 +514,6 @@ class ParticleLife:
             f"Workspace: {self.config.width}x{self.config.height}",
             f"Particles: {self.n} (50-2000)",
             f"Species: {self.n_species} (2-10)",
-            f"Preset: {self.selected_preset}",
             f"Active Matrix: {'POSITION' if self.current_matrix == 'position' else 'ORIENTATION'}",
             "",
             "Controls:",
@@ -482,21 +528,14 @@ class ParticleLife:
             "O - Toggle orientation display",
             "SPACE - Pause/Resume",
             "R - Reset positions",
-            "1-5 - Select presets",
+            "S - Save current configuration",
             "I - Toggle info",
             "Q/ESC - Quit",
             "",
             "Matrix Editor (when M pressed):",
             "TAB - Switch between matrices",
             "WASD - Navigate matrix",
-            "+/- - Modify value",
-            "",
-            "Presets:",
-            "1 - Chaos",
-            "2 - Symbiosis",
-            "3 - Predator-Prey",
-            "4 - Random",
-            "5 - Neutral"
+            "+/- - Modify value"
         ]
 
         y = 10
@@ -755,39 +794,28 @@ class ParticleLife:
                         i, j = self.matrix_cursor
                         if self.current_matrix == "position":
                             self.matrix[i, j] = min(1.0, self.matrix[i, j] + 0.1)
+                            self.config._position_matrix_np = self.matrix  # Update config
                             print(f"Position Matrix[{i},{j}] = {self.matrix[i, j]:.2f}")
                         else:
                             self.alignment_matrix[i, j] = min(1.0, self.alignment_matrix[i, j] + 0.1)
+                            self.config._orientation_matrix_np = self.alignment_matrix  # Update config
                             print(f"Orientation Matrix[{i},{j}] = {self.alignment_matrix[i, j]:.2f}")
                     elif event.key == pygame.K_MINUS:
                         # Decrease matrix value
                         i, j = self.matrix_cursor
                         if self.current_matrix == "position":
                             self.matrix[i, j] = max(-1.0, self.matrix[i, j] - 0.1)
+                            self.config._position_matrix_np = self.matrix  # Update config
                             print(f"Position Matrix[{i},{j}] = {self.matrix[i, j]:.2f}")
                         else:
                             self.alignment_matrix[i, j] = max(-1.0, self.alignment_matrix[i, j] - 0.1)
+                            self.config._orientation_matrix_np = self.alignment_matrix  # Update config
                             print(f"Orientation Matrix[{i},{j}] = {self.alignment_matrix[i, j]:.2f}")
 
-                elif event.key == pygame.K_1:
-                    self.selected_preset = "chaos"
-                    self.matrix = self.generate_matrix("chaos")
-
-                elif event.key == pygame.K_2:
-                    self.selected_preset = "symbiosis"
-                    self.matrix = self.generate_matrix("symbiosis")
-
-                elif event.key == pygame.K_3:
-                    self.selected_preset = "predator"
-                    self.matrix = self.generate_matrix("predator")
-
-                elif event.key == pygame.K_4:
-                    self.selected_preset = "random"
-                    self.matrix = self.generate_matrix("random")
-
-                elif event.key == pygame.K_5:
-                    self.selected_preset = "neutral"
-                    self.matrix = self.generate_matrix("neutral")
+                elif event.key == pygame.K_s:
+                    # Save current configuration
+                    filename = self.save_current_config()
+                    print(f"Configuration saved to {filename}")
 
         return True
 
@@ -815,10 +843,25 @@ class ParticleLife:
 
 def main():
     """Main entry point"""
+    parser = argparse.ArgumentParser(description='Particle Life Simulation')
+    parser.add_argument('--load', type=str, help='Path to configuration file to load')
+    args = parser.parse_args()
+
     print("Starting Particle Life Simulation...")
     print("Press SPACE to pause, I to toggle info, Q to quit")
 
-    config = Config()
+    # Load configuration or create default
+    if args.load:
+        if os.path.exists(args.load):
+            print(f"Loading configuration from {args.load}")
+            config = Config.load(args.load)
+        else:
+            print(f"Configuration file {args.load} not found, using default")
+            config = Config()
+    else:
+        print("Starting with default configuration")
+        config = Config()
+
     sim = ParticleLife(config)
     sim.run()
 
