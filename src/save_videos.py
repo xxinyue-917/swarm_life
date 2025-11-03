@@ -8,7 +8,7 @@ Script to automatically run particle life simulation and save videos for all pre
 
 PRESETS_DIR = 'presets'      # Directory containing preset JSON files
 OUTPUT_DIR = 'videos'         # Directory to save videos
-VIDEO_DURATION = 10           # Video duration in seconds
+VIDEO_DURATION = 20           # Video duration in seconds
 FPS = 30                      # Frames per second
 PROCESS_SINGLE = None         # Set to a file path to process single preset, None for all
 
@@ -79,6 +79,106 @@ class SimulationVideoSaver:
         # Initialize pygame
         pygame.init()
 
+        # Initialize font for matrix display
+        pygame.font.init()
+        self.font = pygame.font.Font(None, 16)  # Small font for matrix display
+
+    def draw_matrices(self, surface, sim):
+        """Draw both matrices in the corner of the screen with color indicators"""
+        grey = (80, 80, 80)  # Darker grey for better visibility
+        x_offset = 10  # Distance from left edge
+        y_offset = 10  # Distance from top edge
+
+        # Get matrices from simulation
+        pos_matrix = sim.matrix if hasattr(sim, 'matrix') else None
+        ori_matrix = sim.alignment_matrix if hasattr(sim, 'alignment_matrix') else None
+        n_species = sim.n_species
+        colors = sim.colors if hasattr(sim, 'colors') else None
+
+        if pos_matrix is None or ori_matrix is None or colors is None:
+            return
+
+        # Calculate cell width for proper alignment
+        cell_width = 50  # Width per matrix cell
+        row_indicator_width = 20  # Space for row color indicator
+
+        # Calculate background size
+        width = row_indicator_width + (n_species * cell_width) + 20
+        height = (n_species * 15 + 40) * 2 + 10  # Height for both matrices
+
+        # Draw semi-transparent white background
+        bg_surface = pygame.Surface((width, height))
+        bg_surface.set_alpha(230)  # Semi-transparent
+        bg_surface.fill((255, 255, 255))
+        surface.blit(bg_surface, (x_offset - 5, y_offset - 5))
+
+        # Draw Position Matrix label
+        text = self.font.render("Position Matrix:", True, grey)
+        surface.blit(text, (x_offset, y_offset))
+        y_offset += 20
+
+        # Draw column color indicators (aligned with matrix columns)
+        for j in range(n_species):
+            x_pos = x_offset + row_indicator_width + (j * cell_width) + cell_width // 2
+            pygame.draw.circle(surface, colors[j], (x_pos, y_offset), 4)
+
+        y_offset += 10  # Space between column indicators and matrix
+
+        # Draw Position Matrix values with row color indicators
+        for i in range(n_species):
+            # Draw colored circle for row (which species is acting)
+            pygame.draw.circle(surface, colors[i], (x_offset + 8, y_offset + 7), 4)
+
+            # Draw matrix values aligned with column indicators
+            x_pos = x_offset + row_indicator_width
+            for j in range(n_species):
+                value = pos_matrix[i, j]
+                value_text = f"{value:5.2f}"
+                text = self.font.render(value_text, True, grey)
+                # Center the text in the cell
+                text_rect = text.get_rect()
+                text_rect.centerx = x_pos + cell_width // 2
+                text_rect.centery = y_offset + 7
+                surface.blit(text, text_rect)
+                x_pos += cell_width
+
+            y_offset += 15
+
+        # Add spacing between matrices
+        y_offset += 10
+
+        # Draw Orientation Matrix label
+        text = self.font.render("Orientation Matrix:", True, grey)
+        surface.blit(text, (x_offset, y_offset))
+        y_offset += 20
+
+        # Draw column color indicators for orientation matrix
+        for j in range(n_species):
+            x_pos = x_offset + row_indicator_width + (j * cell_width) + cell_width // 2
+            pygame.draw.circle(surface, colors[j], (x_pos, y_offset), 4)
+
+        y_offset += 10  # Space between column indicators and matrix
+
+        # Draw Orientation Matrix values with row color indicators
+        for i in range(n_species):
+            # Draw colored circle for row
+            pygame.draw.circle(surface, colors[i], (x_offset + 8, y_offset + 7), 4)
+
+            # Draw matrix values aligned with column indicators
+            x_pos = x_offset + row_indicator_width
+            for j in range(n_species):
+                value = ori_matrix[i, j]
+                value_text = f"{value:5.2f}"
+                text = self.font.render(value_text, True, grey)
+                # Center the text in the cell
+                text_rect = text.get_rect()
+                text_rect.centerx = x_pos + cell_width // 2
+                text_rect.centery = y_offset + 7
+                surface.blit(text, text_rect)
+                x_pos += cell_width
+
+            y_offset += 15
+
     def run_and_save(self, config_path, output_path):
         """
         Run simulation with given config and save video
@@ -143,6 +243,9 @@ class SimulationVideoSaver:
                 else:
                     # Draw simple circle
                     pygame.draw.circle(sim.screen, color, (x, y), 4)
+
+            # Draw matrices in the corner
+            self.draw_matrices(sim.screen, sim)
 
             # Add frame to video
             recorder.add_frame(sim.screen)
