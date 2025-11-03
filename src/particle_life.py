@@ -23,7 +23,7 @@ class Config:
     init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
     n_species: int = 2
     n_particles: int = 90
-    dt: float = 0.05
+    dt: float = 0.1  # Timestep - increase for faster simulation (was 0.05)
     max_speed: float = 300.0
     a_rep: float = 5.0
     a_att: float = 2.0
