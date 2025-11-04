@@ -18,6 +18,7 @@ import os
 import sys
 import glob
 import argparse
+import time
 import numpy as np
 import pygame
 import cv2
@@ -265,8 +266,12 @@ class SimulationVideoSaver:
 
         # Clean up
         recorder.release()
-        pygame.quit()
-        pygame.init()  # Reinitialize for next video
+        # Clean up the simulation instance properly
+        del sim
+
+        # Don't quit pygame here - keep it initialized for the next video
+        # Just pump events to clear the queue
+        pygame.event.pump()
 
         print(f" Video saved: {output_path}")
 
@@ -303,10 +308,17 @@ class SimulationVideoSaver:
 
             try:
                 self.run_and_save(preset_path, output_path)
+                # Small delay between videos to ensure cleanup
+                time.sleep(0.5)
             except Exception as e:
                 print(f" Error processing {preset_name}: {e}")
+                # Try to recover from errors by reinitializing pygame
+                pygame.quit()
+                pygame.init()
                 continue
 
+        # Final cleanup after all videos are processed
+        pygame.quit()
         print(f"\n All videos saved to {output_dir}/")
 
 
