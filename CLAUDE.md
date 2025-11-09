@@ -1,232 +1,125 @@
-# CLAUDE.md — Particle Life Sandbox (Python backend)
+# CLAUDE.md
 
-> Build a **clean, minimal, extensible** Particle Life sandbox I can play with, with a **side-panel matrix editor** (editable interaction matrix for all species) and a **bounded workspace** where particles **reflect** on collision with the boundary. Keep architecture simple, avoid over-engineering (e.g., no unnecessary class hierarchies, no blanket `try/except` scaffolding).
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
----
+## Project Overview
 
-## 1) Mission & Outcomess
+Interactive 2D particle life simulation with dual interaction matrices (position and orientation) implemented in pygame. The system simulates emergent swarm behaviors through simple local interactions between particles of different species.
 
-**Mission**
-- Implement a 2D Particle Life playground with a Python backend and a lightweight web UI.
-- Let me **interactively edit the S×S interaction matrix K** in a side panel and see behavior update live.
-- Enforce a **rectangular bounded world** with **reflective boundaries** (specular reflection on walls).
-- Keep code **concise, readable, testable**, and **ready to extend for swarm-robotics experiments**.
+## Core Components
 
-**Primary Outcomes**
-- Smooth real-time simulation (>= 60 FPS client-side rendering target; backend tick decoupled).
-- Live editing of:
-  - number of particles, number of species S
-  - interaction matrix `K[i][j]` (slider or numeric input per cell)
-  - force-kernel parameters (short-range repulsion, mid-range attraction, cutoff)
-  - damping, timestep, noise level
-- Controls: play/pause/reset, seed, speed, save/load presets (JSON).
-- Deterministic option via RNG seed.
+### Main Simulation (`src/particle_life.py`)
+- **Config**: Dataclass containing all simulation parameters, matrix storage, and JSON serialization
+- **ParticleLife**: Main simulation class with pygame visualization
+  - Dual matrix system: position matrix (attraction/repulsion) and orientation matrix (alignment/swirling)
+  - Interactive matrix editing with real-time parameter adjustment
+  - Workspace resizing, fullscreen support, and zoom functionality
+  - Equal species distribution when changing particle/species counts
 
-**Non-Goals (for v1)**
-- No heavy dependency frameworks unless clearly justified.
-- No persistent DB; presets saved as JSON to disk (or browser download).
-- No GPU acceleration (keep CPU-friendly, but structure so it can be added later).
+### Video Recording (`src/save_videos.py`)
+- **SimulationVideoSaver**: Batch processes presets into MP4 videos
+- **VideoRecorder**: OpenCV-based frame capture from pygame surface
+- Overlays both interaction matrices on recorded videos for documentation
 
----
+## Commands
 
-## 2) Architecture (minimal, clear layers)
+```bash
+# Run interactive simulation
+python src/particle_life.py
+python src/particle_life.py --load presets/3_chase.json
 
-**Backend (Python)**
-- Framework: **FastAPI** (simple REST + WebSocket streaming).
-- Core modules:
-  - `simulation.py`: state structs, neighbor search, force calc, integrator, boundary handling.
-  - `config.py`: dataclasses for `SimConfig`, `KernelParams`, and validation.
-  - `presets.py`: named presets (dict of configs + matrices).
-  - `api.py`: REST endpoints (get/set config, reset), WebSocket for frames.
-- Concurrency: a single simulation loop running on an asyncio task; tick at fixed dt; broadcast snapshots to WS subscribers.
-- Performance: uniform grid (cell-linked list) neighbor search; avoid per-frame allocations.
+# Record videos from presets
+python src/save_videos.py                           # Process all presets
+python src/save_videos.py --load presets/3_chase.json  # Single preset
 
-**Frontend (web)**
-- One static page (`index.html`) with:
-  - `<canvas>` for rendering.
-  - **Side panel** with an **editable S×S matrix** (grid of inputs/sliders).
-  - Controls: play/pause/reset, counts, kernel sliders, speed, seed, noise, presets (save/load).
-- Vanilla TypeScript (or ES6) + minimal CSS; no large UI framework required.
-- Rendering decoupled from backend tick: draw last received state; use WS for state stream, REST for config/mutations.
+# Install dependencies
+pip install pygame numpy
+pip install opencv-python  # For video recording
+```
 
-**File Tree (target)**
+## Architecture
 
-    particle-life/
-    ├── backend/
-    │   ├── api.py
-    │   ├── simulation.py
-    │   ├── config.py
-    │   ├── presets.py
-    │   ├── schemas.py
-    │   ├── requirements.txt
-    │   └── tests/
-    │       ├── test_forces.py
-    │       ├── test_boundaries.py
-    │       └── test_integrator.py
-    ├── frontend/
-    │   ├── index.html
-    │   ├── app.js # or app.ts compiled to app.js
-    │   └── styles.css
-    ├── scripts/
-    │   └── run_dev.sh
-    ├── README.md
-    └── AGENT.md
+### Force Calculation System
+The simulation uses a dual-force model:
 
----
+1. **Position Forces** (radial attraction/repulsion):
+   - Attraction term: `k_pos * a_att`
+   - Repulsion term: `a_rep / sqrt(r)`
+   - Applied along the radial direction between particles
 
-## 3) Data & Interfaces
+2. **Orientation Forces** (tangential swirling):
+   - Swirl term: `-10 * k_rot * (ω_j/ω_max) * (a_rot/r)`
+   - Applied along the tangential direction
+   - Creates rotational/alignment behaviors
 
-**State Structures**
-- `Particles`: arrays (SoA) for `x`, `y`, `vx`, `vy`, `species` (int in `[0..S-1]`).
-- `SimConfig`:
-  - world: `width`, `height`, `boundary="reflect"`
-  - time: `dt`, `damping`, `noise_std`, `seed`
-  - counts: `n_particles`, `n_species`
-  - kernel: `repel_radius`, `attract_radius`, `cutoff_radius`, `repel_strength`, `attract_strength`
-  - matrix: `K` (S×S floats in [-1,1] initially)
-- **Kernel**: piecewise radial force:
-  - $r < r_{rep}$: strong repulsion
-  - $r_{rep} \le r < r_{att}$: attraction scaled by `K[si][sj]`
-  - $r \ge r_{cut}$: 0
-  - Continuous at the joins; capped at max magnitude to ensure stability.
+### Interaction Matrices
+- **Position Matrix** (`K_pos[i][j]`): Controls attraction/repulsion between species i and j
+  - Positive values: net attraction
+  - Negative values: net repulsion
+  - Range: [-1.0, 1.0]
 
-**Boundary Handling**
-- Reflective walls at $x \in [0,W]$, $y \in [0,H]$.
-- If next pos crosses boundary, clamp to wall and reflect velocity component (e.g., `vx = -vx * restitution`, restitution ≈ 1.0).
-- Ensure no particle gets stuck by backing out to valid region.
+- **Orientation Matrix** (`K_rot[i][j]`): Controls alignment/swirling between species i and j
+  - Influences tangential velocity components
+  - Creates collective rotation patterns
+  - Range: [-1.0, 1.0]
 
-**API**
-- `GET /config` → current `SimConfig`
-- `POST /config` → replace/patch config (validate + apply)
-- `POST /reset` → reinitialize state with current config
-- `GET /presets` → list preset names
-- `GET /presets/{name}` → fetch preset config
-- `POST /presets` → upload/save preset JSON
-- **WS** `ws://.../state` → stream snapshots (e.g., every N ticks), payload:
+## Key Controls
 
-        {
-          "t": float,
-          "particles": { "x": [...], "y": [...], "vx": [...], "vy": [...], "species": [...] },
-          "n": int, "S": int
-        }
+### Simulation Controls
+- **SPACE**: Pause/Resume
+- **R**: Reset particle positions
+- **S**: Save current configuration with timestamp
+- **I**: Toggle info panel
+- **O**: Toggle orientation display
+- **F11/F**: Toggle fullscreen with auto-zoom
+- **Q/ESC**: Quit
 
----
+### Parameter Adjustment
+- **UP/DOWN**: Change species count (2-10)
+- **LEFT/RIGHT**: Change particle count (±50)
+- **SHIFT+LEFT/RIGHT**: Change workspace width
+- **SHIFT+UP/DOWN**: Change workspace height
+- **Mouse drag at edges**: Resize workspace
 
-## 4) Simulation Loop & Numerics
+### Matrix Editing
+- **M**: Toggle matrix editor
+- **TAB**: Switch between Position/Orientation matrix
+- **WASD**: Navigate matrix cells
+- **+/-**: Modify selected cell value (±0.1)
 
-**Integrator**
-- Semi-implicit Euler (symplectic Euler) for stability. The steps are applied each tick:
+## Presets System
 
-        v += dt * a
-        v *= damping
-        x += dt * v
+Presets are JSON configurations stored in `presets/` containing:
+- Workspace dimensions and initialization area
+- Particle and species counts
+- Physical parameters (dt, max_speed, damping)
+- Both interaction matrices (position and orientation)
 
-        if noise_std > 0:
-            v += gaussian_noise(scale=noise_std)
+Example behaviors:
+- **2_chase**: Predator-prey dynamics
+- **3_rotate_together**: Collective rotation
+- **3_encapsulate**: One species surrounds another
+- **3_planet**: Orbital dynamics
 
-**Neighbor Search**
-- Uniform grid with cell size ≈ `cutoff_radius`.
-- For each particle, only inspect its own + 8 neighbor cells.
+## Development Notes
 
-**Force Accumulation**
-- For each pair of particles `(i, j)` within the `cutoff_radius`:
+### Adding New Behaviors
+1. Modify force calculation in `compute_velocities()` (lines 357-418)
+2. Adjust matrix interpretation or add new matrix types
+3. Create presets demonstrating the behavior
 
-        s_i = species[i]
-        s_j = species[j]
-        k = K[s_i][s_j]
+### Performance Optimization
+- Currently uses O(n²) neighbor checking
+- Cell-linked list optimization possible for large particle counts
+- Boundary conditions use reflection with velocity reversal
 
-        r = distance(i, j)
-        force_magnitude = k * attract_term(r) - repel_term(r)
+### Testing Patterns
+- Use seed=42 for deterministic testing
+- Equal species distribution ensures balanced interactions
+- Workspace resizing maintains particle containment
 
-        direction_ij = (pos_j - pos_i) / r
-        force_on_i = force_magnitude * direction_ij
-        total_force[i] += force_on_i
-        total_force[j] -= force_on_i
-
-**Stability**
-- Cap per-pair force and total acceleration.
-- Optional softening `epsilon` to avoid division by zero.
-
----
-
-## 5) Frontend UX Requirements
-
-**Matrix Editor (Side Panel)**
-- Render an S×S grid; each cell editable (slider or numeric).
-- Provide buttons: randomize matrix, zero-diagonal toggle, symmetry toggle (`K=0.5*(K+K^T)`), normalize ranges.
-- Live-apply: on change, `POST /config` with updated `K`; server restarts forces immediately (no reset required).
-
-**Controls**
-- Play/Pause, Reset
-- Species count S (rebuild matrix UI)
-- Particle count n (on the fly: add/remove with random positions)
-- Kernel sliders: radii & strengths
-- Damping, noise, speed
-- Seed (deterministic runs)
-- Presets: dropdown + Save/Load JSON (download/upload)
-
-**Rendering**
-- Draw particles as circles; species → distinct hues (computed client-side).
-- Option to show boundary box, velocity vectors (toggle).
-
----
-
-## 6) Extensibility for Swarm Robotics
-
-**Hooks**
-- Export **macro metrics** each second: cluster count & size distribution, coverage %, collision rate, neighbor churn.
-- Pluggable **task layers**: e.g., goal points, obstacles as external potential $U_{env}(x,y)$ (add to forces).
-- Optional **role masks**: special species as “scouts/guards/carriers”.
-- **Ground-truth-free controls**: ensure all control laws depend on relative positions only (or RSSI-like range).
-
-**Future Bridges**
-- ROS2 adapter (topic for particle states).
-- Replace kernel with learned function $F_\theta(r, s_i, s_j)$; training via inverse design (target macro metrics).
-
----
-
-## 7) Testing & Quality
-
-**Unit Tests (pytest)**
-- `test_forces.py`: piecewise kernel continuity, sign conventions, caps.
-- `test_boundaries.py`: reflection logic, energy behavior with restitution.
-- `test_integrator.py`: stability under simple harmonic potential; invariants within tolerance.
-- `test_neighbors.py`: neighbor search correctness vs. brute-force on small sets.
-
-**Validation Demos**
-- Preset A (2 species): flocking/segregation.
-- Preset B (3 species): cyclic chase (rock–paper–scissors style).
-- Preset C (obstacles on): boundary hugging & reflection.
-
-**Style & Simplicity**
-- Prefer pure functions + small modules.
-- Avoid global singletons; pass config/state explicitly.
-- No blanket `try/except`; only narrow, necessary exception handling with clear messages.
-- Type hints everywhere; docstrings for public functions.
-
----
-
-## 8) Initial Preset Example (JSON)
-
-    {
-      "name": "tri-cyclic",
-      "n_particles": 1500,
-      "n_species": 3,
-      "seed": 42,
-      "dt": 0.02,
-      "damping": 0.98,
-      "noise_std": 0.0,
-      "world": { "width": 800, "height": 600, "boundary": "reflect" },
-      "kernel": {
-        "repel_radius": 4.0,
-        "attract_radius": 24.0,
-        "cutoff_radius": 36.0,
-        "repel_strength": 1.8,
-        "attract_strength": 0.8
-      },
-      "K": [
-        [ -0.2,  0.9, -0.4 ],
-        [ -0.4, -0.2,  0.9 ],
-        [  0.9, -0.4, -0.2 ]
-      ]
-    }
+### Common Modifications
+- Change force kernels: Edit attraction/repulsion terms in `compute_velocities()`
+- Add new matrix types: Extend Config, add computation in force loop
+- Modify boundaries: Change reflection logic (lines 456-467)
+- Custom presets: Save configurations with 'S' during runtime

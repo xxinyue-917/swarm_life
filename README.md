@@ -1,176 +1,228 @@
-# Particle Life Sandbox
+# Particle Life - Swarm Dynamics Simulation
 
-A clean, minimal particle life simulation using a smooth 3-piece radial kernel.
+An interactive particle life simulation featuring dual interaction matrices for complex emergent swarm behaviors. Watch as particles self-organize into flocks, predator-prey dynamics, rotating clusters, and more!
+
+![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
+![Pygame](https://img.shields.io/badge/Pygame-2.0%2B-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## Features
 
-- **3-piece radial kernel**: Smooth interaction forces (repulsion → attraction → zero)
-- **N-species support**: Flexible species count (1-10) with editable interaction matrix
-- **Real-time editing**: Modify species count, particle count, and interaction matrix on the fly
-- **Presets**: 5 built-in scenarios (guards_workers, cyclic, flocking, ecosystem, chaos)
-- **Reflective boundaries**: Particles bounce off walls
-- **Clean architecture**: Single unified simulation system, easy to modify
+- **Dual Interaction System**: Separate position (attraction/repulsion) and orientation (alignment/swirling) matrices
+- **Real-time Interactive Control**: Modify parameters and matrices while simulation runs
+- **11 Preset Behaviors**: From chase dynamics to planetary orbits
+- **Video Recording**: Batch convert presets to MP4 videos with matrix overlays
+- **Flexible Workspace**: Resizable window with fullscreen and zoom support
+- **Visual Orientation**: Particles show heading direction for rotation behaviors
 
 ## Quick Start
 
 ### Requirements
-- Python 3.9+
-- NumPy, FastAPI, Uvicorn
+- Python 3.7+
+- pygame >= 2.0
+- numpy >= 1.19
+- opencv-python >= 4.5 (optional, for video recording)
 
-### Setup
+### Installation
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install numpy fastapi uvicorn websockets
+# Clone the repository
+git clone https://github.com/yourusername/swarm_life.git
+cd swarm_life
+
+# Install dependencies
+pip install pygame numpy
+
+# Optional: For video recording
+pip install opencv-python
 ```
 
-### Run
+### Running the Simulation
+
 ```bash
-uvicorn backend.api:app --reload
+# Run with default settings
+python src/particle_life.py
+
+# Load a specific preset
+python src/particle_life.py --load presets/3_chase.json
 ```
 
-Open **http://127.0.0.1:8000** in your browser.
+## Controls
 
-## Usage
+### Basic Controls
+| Key | Action |
+|-----|--------|
+| **SPACE** | Pause/Resume simulation |
+| **R** | Reset particle positions |
+| **S** | Save current configuration |
+| **I** | Toggle info panel |
+| **O** | Toggle orientation display |
+| **F11/F** | Toggle fullscreen |
+| **Q/ESC** | Quit |
 
-1. **Adjust species/particles**: Use the input fields
-2. **Edit matrix**: Click cells in the interaction matrix table
-   - Positive values = repulsion
-   - Negative values = attraction
-3. **Apply presets**: Select from dropdown and click Apply
-4. **Reset**: Click Reset to restart with current settings
+### Parameter Adjustment
+| Key | Action |
+|-----|--------|
+| **↑/↓** | Change species count (2-10) |
+| **←/→** | Change particle count (±50) |
+| **Shift+←/→** | Adjust workspace width |
+| **Shift+↑/↓** | Adjust workspace height |
+| **Mouse drag edges** | Resize window |
+
+### Matrix Editor
+| Key | Action |
+|-----|--------|
+| **M** | Toggle matrix editor |
+| **TAB** | Switch Position/Orientation matrix |
+| **WASD** | Navigate matrix cells |
+| **+/-** | Modify selected value |
+
+## How It Works
+
+### Dual Force System
+
+The simulation computes forces between particles using two interaction matrices:
+
+1. **Position Matrix (K_pos)**: Controls radial forces
+   - Positive values → net attraction
+   - Negative values → net repulsion
+   - Creates clustering and separation behaviors
+
+2. **Orientation Matrix (K_rot)**: Controls tangential forces
+   - Influences rotational alignment
+   - Creates swirling and orbital patterns
+   - Enables collective rotation behaviors
+
+### Force Calculation
+
+For each particle pair (i,j):
+```
+radial_force = (K_pos[i,j] * a_att - a_rep/√r) * r̂
+tangential_force = -10 * K_rot[i,j] * (ω_j/ω_max) * (a_rot/r) * t̂
+total_force = radial_force + tangential_force
+```
+
+## Preset Behaviors
+
+The `presets/` directory contains 11 example configurations:
+
+| Preset | Description |
+|--------|-------------|
+| **2_chase** | Predator-prey pursuit dynamics |
+| **2_dynamically_rotate** | Dynamic rotation patterns |
+| **2_encapsulate** | One species surrounds another |
+| **2_move_together** | Cohesive flocking |
+| **2_sun_earth** | Orbital dynamics |
+| **3_chase** | Three-species cyclic pursuit |
+| **3_encapsulate** | Complex containment patterns |
+| **3_encapsulate_rotate** | Rotating encapsulation |
+| **3_move_together** | Multi-species flocking |
+| **3_planet** | Multi-body orbital system |
+| **3_rotate_together** | Collective rotation |
+
+## Video Recording
+
+Generate videos from your saved configurations:
+
+```bash
+# Process all presets
+python src/save_videos.py
+
+# Process specific preset
+python src/save_videos.py --load presets/3_chase.json
+```
+
+Videos are saved to `videos/` directory with both interaction matrices overlaid.
+
+### Configuration
+
+Edit `src/save_videos.py` to adjust:
+- `VIDEO_DURATION`: Length of videos (default: 20 seconds)
+- `FPS`: Frame rate (default: 30)
+- `OUTPUT_DIR`: Output directory (default: 'videos')
+
+## Creating Custom Behaviors
+
+1. **Run the simulation**: `python src/particle_life.py`
+2. **Adjust parameters**: Use arrow keys to set species/particle counts
+3. **Edit matrices**: Press 'M' to open matrix editor
+4. **Fine-tune**: Use WASD to navigate, +/- to adjust values
+5. **Save preset**: Press 'S' to save configuration
+6. **Generate video**: Run `python src/save_videos.py`
 
 ## Project Structure
 
 ```
 swarm_life/
-├── backend/
-│   ├── simulation.py    # Main simulation class
-│   ├── interaction.py   # 3-piece radial kernel
-│   ├── config.py        # Configuration dataclass
-│   ├── presets.py       # Preset scenarios
-│   └── api.py           # FastAPI endpoints + WebSocket
-├── frontend/
-│   ├── index.html       # UI layout
-│   ├── main.js          # WebSocket client + rendering
-│   └── styles.css       # Styling
-└── tests/
-    └── test_kernel.py   # Kernel tests
+├── src/
+│   ├── particle_life.py      # Main simulation
+│   └── save_videos.py         # Video recording utility
+├── presets/                   # Saved configurations
+│   ├── 2_chase.json
+│   ├── 3_planet.json
+│   └── ...
+├── videos/                    # Generated videos (created on first use)
+├── CLAUDE.md                  # Development guide
+├── README.md                  # This file
+└── VIDEO_README.md           # Video recording guide
 ```
 
-## Modifying Interaction Logic
+## Physics Parameters
 
-### 1. Change the Force Function
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dt` | 0.1 | Simulation timestep |
+| `max_speed` | 300 | Maximum particle velocity |
+| `a_rep` | 5.0 | Repulsion strength |
+| `a_att` | 2.0 | Attraction strength |
+| `a_rot` | 5.0 | Rotation alignment strength |
+| `max_angular_speed` | 20.0 | Maximum angular velocity |
+| `init_space_size` | 100 | Initial spawn area size |
 
-Edit `backend/interaction.py`:
+## Tips for Interesting Patterns
 
-```python
-def radial_kernel(r: float, p: KernelParams) -> float:
-    """
-    Your custom force function here.
-    Positive = repulsion, Negative = attraction
-    """
-    # Example: simple linear
-    if r < p.r_cut:
-        return p.a_rep * (1.0 - r / p.r_cut)
-    return 0.0
-```
+- **Asymmetric matrices** create more dynamic behaviors
+- **Mixed positive/negative values** in position matrix create complex territories
+- **Small orientation values** (0.1-0.3) produce subtle collective motion
+- **Larger orientation values** (0.5-1.0) create strong vortex patterns
+- **Different species counts** reveal different pattern possibilities
 
-### 2. Modify Interaction Matrix
+## Troubleshooting
 
-Edit `backend/presets.py`:
+**Low FPS**: Reduce particle count with LEFT arrow key
 
-```python
-MY_PRESET = Preset(
-    name="my_preset",
-    description="My custom scenario",
-    n_species=4,
-    matrix=np.array([
-        [+0.5, -0.8, +0.3, -0.4],
-        [+0.6, +0.2, -0.7, +0.1],
-        [-0.3, +0.4, +0.1, -0.6],
-        [+0.2, -0.5, +0.8, +0.3],
-    ]),
-)
-```
+**Particles stuck at edges**: Press 'R' to reset positions
 
-Then add it to `PRESETS` dict.
+**Matrix changes not visible**: Ensure simulation is not paused (SPACE to toggle)
 
-### 3. Adjust Kernel Parameters
+**Video recording fails**: Install opencv-python: `pip install opencv-python`
 
-Modify `backend/interaction.py`:
+## Future Enhancements
 
-```python
-@dataclass
-class KernelParams:
-    r_rep: float = 4.0    # Repulsion radius
-    r_att: float = 24.0   # Attraction radius
-    r_cut: float = 36.0   # Cutoff radius
-    a_rep: float = 1.8    # Repulsion strength
-    a_att: float = 0.8    # Attraction strength
-```
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Serve frontend |
-| `/config` | GET | Get current config + matrix |
-| `/config` | POST | Update config (species, particles, etc.) |
-| `/matrix` | POST | Update interaction matrix |
-| `/reset` | POST | Reset simulation |
-| `/presets` | GET | List available presets |
-| `/presets/{name}` | POST | Apply a preset |
-| `/ws` | WebSocket | Real-time simulation stream |
-
-## How It Works
-
-### Force Calculation
-
-For each pair of particles i and j:
-
-1. Compute distance `r = ||pos_j - pos_i||`
-2. If `r < r_cut`:
-   - Get interaction strength: `k = K[species_i][species_j]`
-   - Compute kernel: `g = radial_kernel(r, params)`
-   - Force magnitude: `f = k * g`
-   - Apply force: `force_i += f * direction`
-
-### 3-Piece Kernel
-
-```
-g(r) = {
-    a_rep * (1 - r/r_rep)                  if r < r_rep
-    -a_att * 0.5 * (1 + cos(π(r-r_rep)/(r_att-r_rep)))  if r_rep ≤ r < r_att
-    0                                       if r ≥ r_att
-}
-```
-
-- **r < r_rep**: Linear repulsion (push away)
-- **r_rep ≤ r < r_att**: Cosine attraction (pull together)
-- **r ≥ r_att**: No force
-
-## Presets
-
-| Name | Species | Description |
-|------|---------|-------------|
-| `guards_workers` | 2 | Containment: Guards form ring, Workers cluster inside |
-| `cyclic` | 3 | Rock-paper-scissors dynamics |
-| `flocking` | 3 | Collective motion with mild repulsion |
-| `ecosystem` | 4 | Complex multi-species interactions |
-| `chaos` | 5 | High-energy chaotic system |
-
-## Tests
-
-```bash
-pytest tests/
-```
-
-Tests cover:
-- Kernel continuity and correctness
-- Simulation stability
-- Boundary conditions
+Potential areas for extension:
+- GPU acceleration for larger particle counts
+- Additional force kernels (Lennard-Jones, Morse potential)
+- 3D visualization mode
+- Network/graph-based interaction topologies
+- Goal-directed behaviors and obstacles
+- Multi-agent reinforcement learning integration
 
 ## License
 
-MIT
+MIT - See [LICENSE](LICENSE) file for details
+
+## Contributing
+
+Contributions welcome! Feel free to:
+- Add new preset behaviors
+- Optimize performance
+- Enhance visualization
+- Extend force models
+- Improve documentation
+
+## Acknowledgments
+
+Inspired by:
+- Jeffrey Ventrella's Particle Life investigations
+- Swarm robotics research
+- Complex systems and emergence studies
