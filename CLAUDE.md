@@ -1,125 +1,227 @@
-# CLAUDE.md
+# Swarm Life Research Project
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Research Context
 
-## Project Overview
+This project investigates **emergent collective behaviors** in decentralized multi-agent systems using particle life simulation as a computational model for swarm robotics. The core research question: **How do simple local interaction rules between agents produce complex, coordinated global behaviors without centralized control?**
 
-Interactive 2D particle life simulation with dual interaction matrices (position and orientation) implemented in pygame. The system simulates emergent swarm behaviors through simple local interactions between particles of different species.
+### Relevance to Robotics
 
-## Core Components
+Particle life serves as a **low-dimensional proxy** for swarm robotics:
+- Particles → Physical robots with limited sensing range
+- Interaction matrices → Local communication/sensing protocols
+- Emergent patterns → Desired collective behaviors (formation, pursuit, encapsulation)
 
-### Main Simulation (`src/particle_life.py`)
-- **Config**: Dataclass containing all simulation parameters, matrix storage, and JSON serialization
-- **ParticleLife**: Main simulation class with pygame visualization
-  - Dual matrix system: position matrix (attraction/repulsion) and orientation matrix (alignment/swirling)
-  - Interactive matrix editing with real-time parameter adjustment
-  - Workspace resizing, fullscreen support, and zoom functionality
-  - Equal species distribution when changing particle/species counts
+Understanding parameter-behavior mappings in simulation enables **principled design** of swarm control laws that can be transferred to physical robot teams.
 
-### Video Recording (`src/save_videos.py`)
-- **SimulationVideoSaver**: Batch processes presets into MP4 videos
-- **VideoRecorder**: OpenCV-based frame capture from pygame surface
-- Overlays both interaction matrices on recorded videos for documentation
+---
 
-## Commands
+## Physics Model
+
+### Dual-Force Architecture
+
+Each particle experiences two force components from neighbors:
+
+**1. Radial Force (Position Matrix K_pos)**
+```
+F_radial = (K_pos[i,j] × a_att - a_rep/√r) × r̂
+```
+- Controls attraction/repulsion between species
+- K_pos > 0: net attraction dominates at distance
+- K_pos < 0: net repulsion dominates
+- Creates: clustering, separation, pursuit, encapsulation
+
+**2. Tangential Force (Orientation Matrix K_rot)**
+```
+F_tangential = -10 × K_rot[i,j] × (ω_j/ω_max) × (a_rot/r) × t̂
+```
+- Controls rotational/swirling dynamics
+- Couples angular velocity between species
+- Creates: collective rotation, vortices, orbital motion
+
+### Key Parameters
+
+| Parameter | Symbol | Role |
+|-----------|--------|------|
+| `a_att` | Attraction strength | Base attraction coefficient |
+| `a_rep` | Repulsion strength | Short-range repulsion (prevents collision) |
+| `a_rot` | Rotation coupling | Strength of angular velocity influence |
+| `max_speed` | v_max | Velocity clamp for stability |
+| `max_angular_speed` | ω_max | Angular velocity normalization |
+| `dt` | Δt | Integration timestep |
+
+---
+
+## Codebase Architecture
+
+```
+src/
+├── particle_life.py    # Core simulation + interactive visualization
+├── metrics.py          # Quantitative behavior characterization
+├── sweep.py            # Parameter space exploration
+├── plot_heatmaps.py    # Visualization of sweep results
+└── save_videos.py      # Video generation from presets
+
+presets/                # Discovered behavior configurations (JSON)
+```
+
+### Core Classes
+
+**Config** (`particle_life.py:18-71`)
+- Dataclass holding all simulation parameters
+- JSON serialization for preset save/load
+- Stores both interaction matrices
+
+**ParticleLife** (`particle_life.py:73-868`)
+- Main simulation class with pygame visualization
+- `compute_velocities()`: Force calculation (lines 357-418)
+- `step()`: Euler integration + boundary handling
+- Interactive matrix editing during runtime
+
+### Metrics System (`metrics.py`)
+
+Quantitative descriptors for characterizing emergent behaviors:
+
+| Metric | Description | What it reveals |
+|--------|-------------|-----------------|
+| `R1, R2` | Average radius from centroid | Cluster compactness |
+| `Rdiff` | R1 - R2 | Relative clustering asymmetry |
+| `K` | Kinetic energy | Activity level |
+| `d11, d22` | Intra-species spacing | Same-species cohesion |
+| `d12` | Inter-species spacing | Cross-species mixing/separation |
+| `revs` | Cumulative revolutions | Rotational behavior strength |
+
+### Parameter Sweep (`sweep.py`)
+
+Systematically explores the (k12_pos, k21_pos) × orientation_case space:
+
+**Orientation Cases:**
+- **A**: No orientation coupling (k12_ori=0, k21_ori=0)
+- **B**: Symmetric attraction (k12_ori=1, k21_ori=1)
+- **C**: Antisymmetric/lanes (k12_ori=1, k21_ori=-1)
+- **D**: One-way influence (k12_ori=1, k21_ori=0)
+
+**Usage:**
+```bash
+python src/sweep.py --grid 10 --ori-cases A,B,C,D --burnin 500 --steps 1000 --out results/
+python src/plot_heatmaps.py --csv results/results.csv --out plots/
+```
+
+---
+
+## Discovered Behaviors (Presets)
+
+### Two-Species (2_*)
+
+| Preset | K_pos pattern | Behavior |
+|--------|---------------|----------|
+| `2_chase` | Asymmetric | Predator-prey pursuit |
+| `2_encapsulate` | Strong diagonal, mixed cross | One species surrounds another |
+| `2_move_together` | Symmetric positive | Cohesive flocking |
+| `2_sun_earth` | With orientation matrix | Orbital dynamics |
+| `2_dynamically_rotate` | With orientation | Dynamic rotation |
+
+### Three-Species (3_*)
+
+| Preset | Description |
+|--------|-------------|
+| `3_chase` | Cyclic pursuit (A→B→C→A) |
+| `3_encapsulate` | Nested containment shells |
+| `3_planet` | Multi-body orbital system |
+| `3_rotate_together` | Collective synchronized rotation |
+
+---
+
+## Research Directions
+
+### 1. Behavior Classification
+- **Goal**: Map (K_pos, K_rot) → behavior categories automatically
+- **Approach**: Cluster metric vectors from sweeps
+- **Output**: Phase diagrams of swarm behaviors
+
+### 2. Inverse Design
+- **Goal**: Given desired behavior, find interaction matrices
+- **Approach**: Optimization/search in parameter space
+- **Application**: Design swarm protocols for specific tasks
+
+### 3. Stability Analysis
+- **Goal**: Understand which configurations are stable vs transient
+- **Approach**: Track metric variance over time, perturbation response
+- **Relevance**: Robust swarm behaviors for real robots
+
+### 4. Scalability
+- **Goal**: How do behaviors change with N (particle count)?
+- **Questions**:
+  - Do patterns persist at different scales?
+  - What are finite-size effects?
+
+### 5. Robot Transfer
+- **Goal**: Validate simulation findings on physical robot platforms
+- **Considerations**:
+  - Sensing noise and range limitations
+  - Communication delays
+  - Physical constraints (collision, inertia)
+
+### 6. Extended Physics
+- **Additional forces**: Lennard-Jones, Morse potential
+- **Heterogeneous parameters**: Per-particle variation
+- **Time-varying matrices**: Adaptive behaviors
+- **3D extension**: Volumetric swarm dynamics
+
+---
+
+## Development Commands
 
 ```bash
-# Run interactive simulation
+# Interactive simulation
 python src/particle_life.py
-python src/particle_life.py --load presets/3_chase.json
+python src/particle_life.py --load presets/3_planet.json
+
+# Parameter sweep (headless)
+python src/sweep.py --grid 10 --ori-cases A,B --burnin 200 --steps 500 --seeds 3
+
+# Generate heatmaps
+python src/plot_heatmaps.py --csv sweep_out/results.csv --out plots/
 
 # Record videos from presets
-python src/save_videos.py                           # Process all presets
+python src/save_videos.py                              # All presets
 python src/save_videos.py --load presets/3_chase.json  # Single preset
 
-# Install dependencies
-pip install pygame numpy
+# Dependencies
+pip install pygame numpy matplotlib pandas tqdm
 pip install opencv-python  # For video recording
 ```
 
-## Architecture
+---
 
-### Force Calculation System
-The simulation uses a dual-force model:
+## Key Code Locations
 
-1. **Position Forces** (radial attraction/repulsion):
-   - Attraction term: `k_pos * a_att`
-   - Repulsion term: `a_rep / sqrt(r)`
-   - Applied along the radial direction between particles
+| Feature | File | Lines |
+|---------|------|-------|
+| Force computation | `particle_life.py` | 357-418 |
+| Boundary conditions | `particle_life.py` | 456-467 |
+| Matrix editing UI | `particle_life.py` | 556-628 |
+| Metric calculations | `metrics.py` | All |
+| Sweep configuration | `sweep.py` | 36-53 |
+| Orientation cases | `sweep.py` | 25-34 |
 
-2. **Orientation Forces** (tangential swirling):
-   - Swirl term: `-10 * k_rot * (ω_j/ω_max) * (a_rot/r)`
-   - Applied along the tangential direction
-   - Creates rotational/alignment behaviors
+---
 
-### Interaction Matrices
-- **Position Matrix** (`K_pos[i][j]`): Controls attraction/repulsion between species i and j
-  - Positive values: net attraction
-  - Negative values: net repulsion
-  - Range: [-1.0, 1.0]
+## Experimental Notes
 
-- **Orientation Matrix** (`K_rot[i][j]`): Controls alignment/swirling between species i and j
-  - Influences tangential velocity components
-  - Creates collective rotation patterns
-  - Range: [-1.0, 1.0]
+*Space for recording observations, hypotheses, and findings:*
 
-## Key Controls
+### Observations
+- Asymmetric K_pos matrices tend to produce more dynamic (non-equilibrium) behaviors
+- Strong diagonal values (same-species attraction) create tight clusters
+- Orientation matrix effects are most visible when radial forces are balanced
 
-### Simulation Controls
-- **SPACE**: Pause/Resume
-- **R**: Reset particle positions
-- **S**: Save current configuration with timestamp
-- **I**: Toggle info panel
-- **O**: Toggle orientation display
-- **F11/F**: Toggle fullscreen with auto-zoom
-- **Q/ESC**: Quit
+### Hypotheses to Test
+- [ ] Is there a critical K_pos threshold for chase vs encapsulate transition?
+- [ ] Do 3-species systems show qualitatively different phase diagrams than 2-species?
+- [ ] How does orientation coupling modify stability boundaries?
 
-### Parameter Adjustment
-- **UP/DOWN**: Change species count (2-10)
-- **LEFT/RIGHT**: Change particle count (±50)
-- **SHIFT+LEFT/RIGHT**: Change workspace width
-- **SHIFT+UP/DOWN**: Change workspace height
-- **Mouse drag at edges**: Resize workspace
-
-### Matrix Editing
-- **M**: Toggle matrix editor
-- **TAB**: Switch between Position/Orientation matrix
-- **WASD**: Navigate matrix cells
-- **+/-**: Modify selected cell value (±0.1)
-
-## Presets System
-
-Presets are JSON configurations stored in `presets/` containing:
-- Workspace dimensions and initialization area
-- Particle and species counts
-- Physical parameters (dt, max_speed, damping)
-- Both interaction matrices (position and orientation)
-
-Example behaviors:
-- **2_chase**: Predator-prey dynamics
-- **3_rotate_together**: Collective rotation
-- **3_encapsulate**: One species surrounds another
-- **3_planet**: Orbital dynamics
-
-## Development Notes
-
-### Adding New Behaviors
-1. Modify force calculation in `compute_velocities()` (lines 357-418)
-2. Adjust matrix interpretation or add new matrix types
-3. Create presets demonstrating the behavior
-
-### Performance Optimization
-- Currently uses O(n²) neighbor checking
-- Cell-linked list optimization possible for large particle counts
-- Boundary conditions use reflection with velocity reversal
-
-### Testing Patterns
-- Use seed=42 for deterministic testing
-- Equal species distribution ensures balanced interactions
-- Workspace resizing maintains particle containment
-
-### Common Modifications
-- Change force kernels: Edit attraction/repulsion terms in `compute_velocities()`
-- Add new matrix types: Extend Config, add computation in force loop
-- Modify boundaries: Change reflection logic (lines 456-467)
-- Custom presets: Save configurations with 'S' during runtime
+### TODO
+- [ ] Run comprehensive sweep with finer grid resolution
+- [ ] Implement additional metrics (polarization, angular momentum)
+- [ ] Compare simulation results with physical robot experiments
+- [ ] Explore higher species counts (N > 3)

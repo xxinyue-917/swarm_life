@@ -71,10 +71,19 @@ class Config:
         return cls.from_dict(data)
 
 class ParticleLife:
-    """Main particle life simulation"""
+    """
+    Main particle life simulation.
 
-    def __init__(self, config: Config):
+    Can be used in two modes:
+    1. Interactive mode (headless=False): Full pygame display with UI
+    2. Headless mode (headless=True): Pure simulation, no display
+       - Use this when importing as a library for experiments
+       - Call setup_display() later if you need visualization
+    """
+
+    def __init__(self, config: Config, headless: bool = False):
         self.config = config
+        self.headless = headless
         self.rng = np.random.RandomState(config.seed)
 
         # Initialize particles
@@ -104,12 +113,10 @@ class ParticleLife:
         # Initialize all particle states
         self.initialize_particles()
 
-        # Pygame setup
-        pygame.init()
-        self.screen = pygame.display.set_mode((config.width, config.height))
-        pygame.display.set_caption("Particle Life Simulation")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, 24)
+        # Initialize display variables (may be set up later)
+        self.screen = None
+        self.clock = None
+        self.font = None
 
         # UI state
         self.paused = False
@@ -125,6 +132,23 @@ class ParticleLife:
         self.dragging_edge = None  # Track which edge is being dragged for resize
         self.drag_start_pos = None  # Mouse position when drag started
         self.drag_start_size = None  # Window size when drag started
+
+        # Set up display unless headless
+        if not headless:
+            self.setup_display()
+
+    def setup_display(self, title: str = "Particle Life Simulation"):
+        """
+        Initialize pygame display. Called automatically unless headless=True.
+        Can be called manually after construction for headless instances.
+        """
+        if not pygame.get_init():
+            pygame.init()
+        self.screen = pygame.display.set_mode((self.config.width, self.config.height))
+        pygame.display.set_caption(title)
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 24)
+        self.headless = False
 
     def generate_colors(self, n: int) -> List[Tuple[int, int, int]]:
         """Generate distinct colors for species"""
@@ -191,6 +215,53 @@ class ParticleLife:
             # Partial: return new arrays for appending
             return positions, velocities, orientations, angular_velocities, species
 
+    # =========================================================================
+    # Utility Methods (for use in experiments)
+    # =========================================================================
+
+    def get_swarm_centroid(self) -> np.ndarray:
+        """Get centroid of all particles."""
+        return self.positions.mean(axis=0)
+
+    def get_species_centroids(self) -> List[np.ndarray]:
+        """Get centroid of each species."""
+        centroids = []
+        for s in range(self.n_species):
+            mask = self.species == s
+            if mask.any():
+                centroids.append(self.positions[mask].mean(axis=0))
+            else:
+                centroids.append(np.array([self.config.width / 2, self.config.height / 2]))
+        return centroids
+
+    def get_species_mask(self, species_id: int) -> np.ndarray:
+        """Get boolean mask for particles of a specific species."""
+        return self.species == species_id
+
+    def get_average_velocity(self) -> np.ndarray:
+        """Get average velocity of all particles."""
+        return self.velocities.mean(axis=0)
+
+    def get_species_velocities(self) -> List[np.ndarray]:
+        """Get average velocity for each species."""
+        velocities = []
+        for s in range(self.n_species):
+            mask = self.species == s
+            if mask.any():
+                velocities.append(self.velocities[mask].mean(axis=0))
+            else:
+                velocities.append(np.zeros(2))
+        return velocities
+
+    def set_position_matrix(self, matrix: np.ndarray):
+        """Set the position interaction matrix."""
+        self.matrix = np.array(matrix)
+        self.config._position_matrix_np = self.matrix
+
+    def set_orientation_matrix(self, matrix: np.ndarray):
+        """Set the orientation interaction matrix."""
+        self.alignment_matrix = np.array(matrix)
+        self.config._orientation_matrix_np = self.alignment_matrix
 
     def save_current_config(self):
         """Save current configuration with timestamp"""
