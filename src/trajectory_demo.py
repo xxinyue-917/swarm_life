@@ -6,16 +6,13 @@ Demonstrates how two species groups can follow waypoints by tuning
 the orientation matrix (K_rot). The mechanism:
 1. Position matrix creates two cohesive groups
 2. Orientation matrix with OPPOSITE signs creates net translation
-3. PID controller adjusts K_rot asymmetry to steer toward current waypoint
+3. Dual PID control system:
+   - Steering PID: adjusts K_rot asymmetry for turning
+   - Speed PID: adjusts K_rot magnitude based on distance
 4. When swarm reaches a waypoint, it advances to the next one
 
-This is a waypoint-based approach (not trajectory following):
-- Waypoints are static targets
-- Swarm moves at its natural speed
-- Progress is measured by waypoints reached, not time
-
 Controls:
-    1/2/3/4: Switch path shape (circle, figure-8, line, square)
+    1/2/3/4/5: Switch path shape (circle, figure-8, line, square, spiral)
     +/-: Adjust waypoint reach threshold
     [/]: Adjust number of waypoints
     P: Toggle PID control on/off
@@ -37,32 +34,63 @@ from particle_life import Config, ParticleLife
 
 
 @dataclass
-class PIDController:
-    """Simple PID controller for waypoint tracking."""
-    kp: float = 0.002    # Proportional gain
-    ki: float = 0.00002  # Integral gain
-    kd: float = 0.001    # Derivative gain
+class ScalarPID:
+    """
+    PID controller for scalar values.
+
+    Used for both steering (angular error) and speed (distance error) control.
+    """
+    kp: float = 1.0          # Proportional gain
+    ki: float = 0.01         # Integral gain
+    kd: float = 0.1          # Derivative gain
+    integral_limit: float = 10.0  # Anti-windup limit
 
     def __post_init__(self):
-        self.integral = np.zeros(2)
-        self.prev_error = np.zeros(2)
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.last_output = 0.0  # For debugging/display
 
-    def compute(self, error: np.ndarray, dt: float) -> np.ndarray:
-        """Compute PID output given position error."""
+    def compute(self, error: float, dt: float) -> float:
+        """
+        Compute PID output given scalar error.
+
+        Args:
+            error: Current error value (setpoint - measured)
+            dt: Time step
+
+        Returns:
+            PID output value
+        """
+        # Proportional term
+        p_term = self.kp * error
+
+        # Integral term with anti-windup
         self.integral += error * dt
-        # Anti-windup: clamp integral
-        self.integral = np.clip(self.integral, -100, 100)
+        self.integral = np.clip(self.integral, -self.integral_limit, self.integral_limit)
+        i_term = self.ki * self.integral
 
+        # Derivative term (on error, not measurement)
         derivative = (error - self.prev_error) / max(dt, 0.001)
-        self.prev_error = error.copy()
+        self.prev_error = error
+        d_term = self.kd * derivative
 
-        output = self.kp * error + self.ki * self.integral + self.kd * derivative
-        return output
+        # Combined output
+        self.last_output = p_term + i_term + d_term
+        return self.last_output
 
     def reset(self):
         """Reset PID state."""
-        self.integral = np.zeros(2)
-        self.prev_error = np.zeros(2)
+        self.integral = 0.0
+        self.prev_error = 0.0
+        self.last_output = 0.0
+
+    def get_terms(self) -> tuple:
+        """Get individual PID terms for debugging."""
+        return (
+            self.kp * self.prev_error,  # P term (approximate)
+            self.ki * self.integral,     # I term
+            self.last_output - self.kp * self.prev_error - self.ki * self.integral  # D term (approximate)
+        )
 
 
 class PathGenerator:
@@ -102,6 +130,22 @@ class PathGenerator:
 
         return self.center + self.scale * 0.7 * pos
 
+    def spiral(self, t: float, n_turns: float = 3.0) -> np.ndarray:
+        """
+        Point on spiral path starting from center.
+
+        Args:
+            t: Parameter [0, 2π] mapped to full spiral
+            n_turns: Number of spiral rotations
+        """
+        # t goes from 0 to 2π, map to spiral
+        # radius grows linearly from 0 to scale
+        progress = t / (2 * np.pi)  # 0 to 1
+        radius = self.scale * progress
+        angle = n_turns * 2 * np.pi * progress  # multiple rotations
+
+        return self.center + radius * np.array([np.cos(angle), np.sin(angle)])
+
     def get_point(self, path_type: str, t: float) -> np.ndarray:
         """Get point on path at parameter t."""
         if path_type == "circle":
@@ -112,6 +156,8 @@ class PathGenerator:
             return self.line(t)
         elif path_type == "square":
             return self.square(t)
+        elif path_type == "spiral":
+            return self.spiral(t)
         else:
             return self.circle(t)
 
@@ -158,17 +204,41 @@ class WaypointDemo(ParticleLife):
         )
 
         # Waypoint settings
-        self.path_type = "circle"
-        self.n_waypoints = 12
-        self.waypoint_threshold = 60.0  # Distance to consider waypoint "reached"
+        self.path_type = "spiral"
+        self.n_waypoints = 25
+        self.waypoint_threshold = 10.0  # Distance to consider waypoint "reached"
         self.waypoints = []
         self.current_waypoint_idx = 0
         self.waypoints_completed = 0  # Total waypoints reached (for stats)
 
-        # PID controller (must be initialized before generate_waypoints())
-        self.pid = PIDController(kp=0.003, ki=0.00003, kd=0.0015)
+        # PID controllers (must be initialized before generate_waypoints())
+        #
+        # Steering PID: controls turn adjustment based on angular error
+        # - Input: cross product (sin of angle between current and desired direction)
+        #   Range: [-1, 1] where positive means "need to turn left (CCW)"
+        # - Output: turn_adjustment, used to create K_rot asymmetry
+        #   Target range: [-0.8, 0.8]
+        self.steering_pid = ScalarPID(
+            kp=0.8,           # Strong proportional response to angular error
+            ki=0.05,          # Moderate integral to correct persistent heading errors
+            kd=0.3,           # Derivative to dampen steering oscillations
+            integral_limit=2.0
+        )
+
+        # Speed PID: controls speed factor based on distance to waypoint
+        # - Input: distance in pixels (always positive)
+        #   Range: [0, ~500] typically
+        # - Output: speed_factor multiplier for base_k_rot
+        #   Target range: [0.3, 1.5]
+        self.speed_pid = ScalarPID(
+            kp=0.008,         # Maps ~100px distance to ~0.8 speed factor contribution
+            ki=0.0005,        # Slowly increase effort if stuck far away
+            kd=0.002,         # Reduce speed when approaching quickly (prevents overshoot)
+            integral_limit=50.0
+        )
+
         self.pid_enabled = True
-        self.base_k_rot = 0.4  # Base rotation strength
+        self.base_k_rot = 0.6  # Base rotation strength
 
         # Generate initial waypoints
         self.generate_waypoints()
@@ -192,7 +262,8 @@ class WaypointDemo(ParticleLife):
             self.path_type, self.n_waypoints
         )
         self.current_waypoint_idx = 0
-        self.pid.reset()
+        self.steering_pid.reset()
+        self.speed_pid.reset()
         print(f"Generated {len(self.waypoints)} waypoints for {self.path_type} path")
 
     def _initialize_two_groups(self):
@@ -240,52 +311,118 @@ class WaypointDemo(ParticleLife):
     def advance_waypoint(self):
         """Manually advance to next waypoint."""
         self.current_waypoint_idx = (self.current_waypoint_idx + 1) % len(self.waypoints)
-        self.pid.reset()
+        self.steering_pid.reset()
+        self.speed_pid.reset()
         print(f"Skipped to waypoint {self.current_waypoint_idx + 1}/{len(self.waypoints)}")
 
     def update_orientation_matrix_pid(self, target_pos: np.ndarray):
-        """Update orientation matrix using PID control to steer toward target.
+        """
+        Update orientation matrix using dual PID control.
+
+        Two separate PIDs are used:
+        1. Steering PID: Controls turn_adjustment based on angular error
+           - Input: cross product of current_direction × desired_direction
+           - This equals sin(angle), positive = need to turn left (CCW)
+           - Output: turn_adjustment to create K_rot asymmetry
+
+        2. Speed PID: Controls speed_factor based on distance
+           - Input: distance to waypoint in pixels
+           - Output: speed_factor multiplier for base_k_rot
 
         KEY PHYSICS:
         K_rot[0,1] and K_rot[1,0] must have OPPOSITE signs for translation!
-        - K_rot[0,1] = NEGATIVE
-        - K_rot[1,0] = POSITIVE
+        - K_rot[0,1] = NEGATIVE (how species 0 rotates due to species 1)
+        - K_rot[1,0] = POSITIVE (how species 1 rotates due to species 0)
         Asymmetric magnitudes create turning.
         """
         swarm_centroid = self.get_swarm_centroid()
-        error = target_pos - swarm_centroid
-        distance = np.linalg.norm(error)
+        error_vec = target_pos - swarm_centroid
+        distance = np.linalg.norm(error_vec)
 
-        # PID output
-        self.pid.compute(error, self.config.dt)
+        # Avoid division by zero
+        if distance < 1e-6:
+            return
 
-        # Desired direction
-        desired_direction = error / (distance + 1e-8)
+        # Desired direction (unit vector toward waypoint)
+        desired_direction = error_vec / distance
 
         # Current velocity direction
         avg_velocity = self.get_average_velocity()
         current_speed = np.linalg.norm(avg_velocity)
 
-        if current_speed > 1e-6:
+        # Use velocity direction if moving, otherwise use direction between species centroids
+        if current_speed > 5.0:
+            # Moving fast enough - use velocity direction
             current_direction = avg_velocity / current_speed
+        else:
+            # Moving slowly (rotating) - use inter-group direction as proxy for "facing"
+            # The line between the two groups indicates translation direction
+            mask0 = self.species == 0
+            mask1 = self.species == 1
+            centroid0 = self.positions[mask0].mean(axis=0)
+            centroid1 = self.positions[mask1].mean(axis=0)
+            group_vector = centroid1 - centroid0
+            group_dist = np.linalg.norm(group_vector)
+            if group_dist > 1e-6:
+                # Perpendicular to inter-group line is the "facing" direction
+                current_direction = np.array([-group_vector[1], group_vector[0]]) / group_dist
+            else:
+                current_direction = desired_direction  # Fallback
 
-            # Cross product gives turning direction
-            cross = (current_direction[0] * desired_direction[1] -
-                     current_direction[1] * desired_direction[0])
+        # ========== STEERING PID ==========
+        # Angular error via cross product: current × desired = sin(angle)
+        # Positive cross = target is to the left = need to turn CCW
+        # Negative cross = target is to the right = need to turn CW
+        angular_error = (current_direction[0] * desired_direction[1] -
+                         current_direction[1] * desired_direction[0])
 
-            # Turn adjustment (positive = turn left, negative = turn right)
-            turn_adjustment = np.clip(cross * 0.6, -0.6, 0.6)
+        if True:  # Always run control (removed speed check)
 
-            # Adjust base speed based on distance (faster when far, slower when close)
-            speed_factor = np.clip(distance / 150, 0.4, 1.2)
+            # PID output for steering
+            turn_adjustment = self.steering_pid.compute(angular_error, self.config.dt)
+            turn_adjustment = np.clip(turn_adjustment, -0.8, 0.8)
+
+            # ========== SPEED PID ==========
+            # Distance error: we want distance to be 0
+            # Larger distance → larger PID output → faster movement
+            speed_output = self.speed_pid.compute(distance, self.config.dt)
+            # Map PID output to reasonable speed factor range
+            speed_factor = np.clip(0.3 + speed_output, 0.3, 1.5)
+
+            # ========== DECELERATION ZONE ==========
+            # Slow down when approaching waypoint to avoid overshoot
+            decel_radius = self.waypoint_threshold * 3  # Start slowing at 3x threshold
+            if distance < decel_radius:
+                # Linear deceleration: full speed at decel_radius, min speed at threshold
+                decel_factor = 0.3 + 0.7 * (distance / decel_radius)
+                speed_factor *= decel_factor
+
+            # ========== APPLY TO K_ROT MATRIX ==========
             effective_k_rot = self.base_k_rot * speed_factor
 
-            # K_rot[0,1] = NEGATIVE, K_rot[1,0] = POSITIVE for translation
-            k01 = -effective_k_rot * (1 - turn_adjustment)
-            k10 = effective_k_rot * (1 + turn_adjustment)
+            # Blend between translation and rotation based on angular error
+            # - Small error: translation mode (opposite signs, asymmetric for steering)
+            # - Large error: rotation mode (same signs, symmetric for true vortex)
+            angular_error_mag = abs(angular_error)
 
-            self.alignment_matrix[0, 1] = np.clip(k01, -1.0, -0.1)
-            self.alignment_matrix[1, 0] = np.clip(k10, 0.1, 1.0)
+            # Blend factor: 0 = pure translation, 1 = pure rotation
+            rotation_blend = np.clip(angular_error_mag * 2 - 0.5, 0, 1)
+
+            # Translation component (opposite signs)
+            k01_trans = -effective_k_rot * (1 - turn_adjustment * 0.5)
+            k10_trans = effective_k_rot * (1 + turn_adjustment * 0.5)
+
+            # Rotation component (same signs, symmetric, direction based on error)
+            rotation_dir = np.sign(angular_error)
+            k01_rot = effective_k_rot * rotation_dir
+            k10_rot = effective_k_rot
+
+            # Blend between modes
+            k01 = k01_trans * (1 - rotation_blend) + k01_rot * rotation_blend
+            k10 = k10_trans * (1 - rotation_blend) + k10_rot * rotation_blend
+
+            self.alignment_matrix[0, 1] = np.clip(k01, -1.0, 1.0)
+            self.alignment_matrix[1, 0] = np.clip(k10, -1.0, 1.0)
 
     def step(self):
         """Perform one simulation step with waypoint control."""
@@ -387,8 +524,13 @@ class WaypointDemo(ParticleLife):
             f"PID: {'ON' if self.pid_enabled else 'OFF'}",
             f"K_rot: [{self.alignment_matrix[0,1]:.2f}, {self.alignment_matrix[1,0]:.2f}]",
             "",
+            f"Steering PID: {self.steering_pid.last_output:.3f}",
+            f"  (I={self.steering_pid.integral:.3f})",
+            f"Speed PID: {self.speed_pid.last_output:.3f}",
+            f"  (I={self.speed_pid.integral:.1f})",
+            "",
             "Controls:",
-            "1/2/3/4: Circle/Figure-8/Line/Square",
+            "1-5: Circle/Figure-8/Line/Square/Spiral",
             "[/]: Fewer/More waypoints",
             "+/-: Smaller/Larger threshold",
             "N: Skip to next waypoint",
@@ -461,12 +603,14 @@ class WaypointDemo(ParticleLife):
                     self._initialize_two_groups()
                     self.current_waypoint_idx = 0
                     self.waypoints_completed = 0
-                    self.pid.reset()
+                    self.steering_pid.reset()
+                    self.speed_pid.reset()
                     print("Reset particles and waypoints")
 
                 elif event.key == pygame.K_p:
                     self.pid_enabled = not self.pid_enabled
-                    self.pid.reset()
+                    self.steering_pid.reset()
+                    self.speed_pid.reset()
                     if not self.pid_enabled:
                         self.alignment_matrix[0, 1] = -self.base_k_rot
                         self.alignment_matrix[1, 0] = self.base_k_rot
@@ -501,6 +645,11 @@ class WaypointDemo(ParticleLife):
                     self.path_type = "square"
                     self.generate_waypoints()
 
+                elif event.key == pygame.K_5:
+                    self.path_type = "spiral"
+                    self.n_waypoints = 24  # Dense waypoints for spiral
+                    self.generate_waypoints()
+
                 # Adjust number of waypoints
                 elif event.key == pygame.K_LEFTBRACKET:
                     self.n_waypoints = max(4, self.n_waypoints - 2)
@@ -529,10 +678,9 @@ class WaypointDemo(ParticleLife):
         print("Waypoint Following Demo")
         print("=" * 60)
         print("Mechanism: Orientation matrix with OPPOSITE signs creates")
-        print("           net translation. PID adjusts asymmetry to steer.")
-        print("")
-        print("The swarm moves at its natural speed - no artificial timing.")
-        print("When it reaches a waypoint, it automatically advances to the next.")
+        print("           net translation. Dual PID control:")
+        print("           - Steering PID: adjusts K_rot asymmetry for turning")
+        print("           - Speed PID: adjusts K_rot magnitude based on distance")
         print("=" * 60)
 
         while running:
