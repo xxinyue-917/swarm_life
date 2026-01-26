@@ -32,92 +32,72 @@ def generate_translation_matrix(n_species: int, strength: float) -> np.ndarray:
     """
     Generate K_rot matrix for forward translation.
 
-    Outer species (edges) have full strength, middle species have reduced strength.
-    For 3 species: outer = 1.0, middle = 0.5
+    ALL species pairs interact (not just neighbors) to ensure coordinated
+    forward motion even for large species counts. Strength is inversely
+    proportional to distance in the line.
 
-    Adjacent species pairs have opposite signs to create net translation.
+    Opposite signs (antisymmetric) create net translation:
+    - K[i,j] = +s/dist for j > i (species ahead push forward)
+    - K[i,j] = -s/dist for j < i (species behind push forward)
     """
     K = np.zeros((n_species, n_species))
 
-    # Compute weight for each species based on position
-    # Edge species (0 and n-1) get weight 1.0, middle species get reduced weight
-    def get_weight(i):
-        if n_species <= 2:
-            return 1.0
-        # Distance from nearest edge (0 = edge, higher = more middle)
-        dist_from_edge = min(i, n_species - 1 - i)
-        # Edge = 1.0, middle = 0.5
-        return 1.0 - 0.5 * (dist_from_edge / ((n_species - 1) / 2))
+    for i in range(n_species):
+        for j in range(n_species):
+            if i != j:
+                dist = abs(i - j)
+                weight = 1.0 / dist  # Stronger coupling for closer pairs
 
-    for i in range(n_species - 1):
-        # Use the weight of the species providing the influence
-        w_i = get_weight(i)
-        w_j = get_weight(i + 1)
-
-        K[i, i+1] = +strength * w_i   # Species i's influence on i+1
-        K[i+1, i] = -strength * w_j   # Species i+1's influence on i
+                # Opposite signs based on relative position
+                if j > i:
+                    K[i, j] = +strength * weight
+                else:
+                    K[i, j] = -strength * weight
 
     return K
 
 
-def generate_rotation_matrix(n_species: int, strength: float, direction: float = 0.0) -> np.ndarray:
+def generate_rotation_matrix(n_species: int, strength: float) -> np.ndarray:
     """
-    Generate K_rot matrix for collective rotation with differential weighting.
+    Generate K_rot matrix for collective rotation.
 
-    When turning, outer species in the turn arc need more force to maintain
-    the line formation (like a marching band pivoting).
+    ALL species pairs interact with uniform strength to ensure coordinated
+    rotation of the entire formation as a rigid body. The physics engine's
+    built-in 1/r distance weighting handles the velocity gradient naturally.
 
-    Args:
-        n_species: Number of species
-        strength: Base rotation strength
-        direction: Turn direction (-1 = left, +1 = right, 0 = neutral)
-                   Left turn: right species (higher index) are on outside
-                   Right turn: left species (lower index) are on outside
+    Same signs (symmetric) create rotation:
+    - K[i,j] = K[j,i] = strength for all pairs
     """
     K = np.zeros((n_species, n_species))
 
     if n_species <= 1:
         return K
 
+    # Full coupling - all species influence each other
     for i in range(n_species):
-        # Calculate position weight based on turn direction
-        # Normalize position: 0 = leftmost, 1 = rightmost
-        normalized_pos = i / (n_species - 1) if n_species > 1 else 0.5
-
-        # When turning left (direction < 0): right species (high index) need more force
-        # When turning right (direction > 0): left species (low index) need more force
-        if direction < 0:
-            # Turning left: weight increases with position (right species = more)
-            weight = 0.5 + 0.5 * normalized_pos
-        elif direction > 0:
-            # Turning right: weight decreases with position (left species = more)
-            weight = 1.0 - 0.5 * normalized_pos
-        else:
-            weight = 1.0
-
         for j in range(n_species):
             if i != j:
-                K[i, j] = strength * weight
+                K[i, j] = strength
 
     return K
 
 
 def generate_position_matrix(n_species: int,
                              self_cohesion: float = 0.6,
-                             cross_attraction: float = 0.3) -> np.ndarray:
+                             cross_attraction: float = 0.4) -> np.ndarray:
     """
     Generate K_pos matrix for species cohesion.
 
     Args:
         n_species: Number of species
         self_cohesion: Diagonal values (attraction within species)
-        cross_attraction: Off-diagonal values (attraction between species)
+        cross_attraction: Off-diagonal values (attraction between neighbors)
     """
     K = np.zeros((n_species, n_species))
     for i in range(n_species):
         K[i, i] = self_cohesion
         for j in range(n_species):
-            if i != j:
+            if abs(i - j) == 1:  # Only neighbors
                 K[i, j] = cross_attraction
     return K
 
@@ -147,7 +127,7 @@ class MultiSpeciesDemo(ParticleLife):
         # Control state
         self.turn_input = 0.0       # -1 (full left) to +1 (full right)
         self.speed_input = 1.0      # 0 (stop) to 1 (full speed)
-        self.base_k_rot = 1.0      # Base rotation matrix strength
+        self.base_k_rot = 0.8      # Base rotation matrix strength
 
         # Input smoothing
         self.turn_decay = 0.95      # How quickly turn input returns to 0
@@ -158,8 +138,17 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Converge mode
         self.converge_active = False
-        self.normal_cross_attraction = 0.3  # Increased for better line cohesion
+        self.normal_cross_attraction = 0.4  # Increased for better line cohesion
         self.converge_cross_attraction = 0.6
+
+        # Matrix editing mode
+        self.matrix_edit_mode = False
+        self.edit_row = 0
+        self.edit_col = 0
+        self.editing_k_rot = True  # True = K_rot, False = K_pos
+
+        # GUI visibility
+        self.hide_gui = False
 
         # Initialize particles in side-by-side formation
         self._initialize_side_by_side()
@@ -182,7 +171,14 @@ class MultiSpeciesDemo(ParticleLife):
         print("  C       Hold to converge formation")
         print("  R       Reset positions")
         print("  SPACE   Pause")
+        print("  H       Hide/show all GUI")
         print("  I       Toggle info panel")
+        print("")
+        print("Matrix Editing:")
+        print("  M       Toggle matrix edit mode")
+        print("  TAB     Switch K_rot/K_pos")
+        print("  WASD    Navigate cells")
+        print("  E/X     Increase/decrease value")
         print("=" * 60)
 
     def _initialize_side_by_side(self):
@@ -225,6 +221,10 @@ class MultiSpeciesDemo(ParticleLife):
         Uses differential rotation: outer species in turn arc get more force
         to maintain line formation.
         """
+        # Skip auto-update when in matrix edit mode (allow manual edits to persist)
+        if self.matrix_edit_mode:
+            return
+
         # Blend factor: 0 = pure translation, 1 = pure rotation
         blend = min(1.0, abs(self.turn_input) * 2)
 
@@ -237,29 +237,27 @@ class MultiSpeciesDemo(ParticleLife):
         # Compute blended matrix
         K_trans = self.K_translation * effective_strength
 
-        # Generate rotation matrix with differential weighting based on turn direction
-        K_rotation = generate_rotation_matrix(self.n_species, 1.0, turn_direction)
+        # Generate rotation matrix (direction applied by multiplying by turn_direction)
+        K_rotation = generate_rotation_matrix(self.n_species, 1.0)
         K_rot = K_rotation * effective_strength * turn_direction
 
         # Blend: when not turning, use translation; when turning, add rotation
         K_blended = K_trans * (1 - blend) + K_rot * blend
 
-        # Apply to alignment matrix
+        # Apply to alignment matrix (only K_rot changes based on input)
         for i in range(self.n_species):
             for j in range(self.n_species):
                 self.alignment_matrix[i, j] = np.clip(K_blended[i, j], -1.0, 1.0)
 
-        # Update position matrix - increase cohesion during turns to maintain formation
-        # Also boost cross-attraction slightly when turning to keep line together
-        base_cross = (self.converge_cross_attraction if self.converge_active
-                      else self.normal_cross_attraction)
-        turn_cohesion_boost = abs(self.turn_input) * 0.2  # Extra cohesion when turning
-        cross_attraction = min(0.8, base_cross + turn_cohesion_boost)
-
+        # K_pos only changes when converge mode is active (C key held)
+        cross_attraction = (self.converge_cross_attraction if self.converge_active
+                           else self.normal_cross_attraction)
         for i in range(self.n_species):
             for j in range(self.n_species):
-                if i != j:
+                if abs(i - j) == 1:  # Only neighbors
                     self.matrix[i, j] = cross_attraction
+                elif i != j:
+                    self.matrix[i, j] = 0.0  # Non-neighbors don't attract
 
     def step(self):
         """Perform one simulation step with control updates."""
@@ -299,6 +297,10 @@ class MultiSpeciesDemo(ParticleLife):
                                max(1, int(self.zoom)))
             else:
                 pygame.draw.circle(self.screen, color, (x, y), max(1, int(4 * self.zoom)))
+
+        # Skip GUI elements if hidden
+        if self.hide_gui:
+            return
 
         # Draw swarm centroid
         centroid = self.get_swarm_centroid().astype(int)
@@ -378,21 +380,40 @@ class MultiSpeciesDemo(ParticleLife):
             rect = pause_text.get_rect(center=(self.config.width // 2, 30))
             self.screen.blit(pause_text, rect)
 
-    def draw_matrix_viz(self):
-        """Draw visualization of K_rot matrix with values."""
-        x_start = self.config.width - 30 - self.n_species * 35
-        y_start = 10
+    def draw_single_matrix(self, matrix, label_text, x_start, y_start, is_editing=False):
+        """Draw a single matrix visualization with values and species colors."""
         cell_size = 35
+        color_indicator_size = 12
 
-        label = self.font.render("K_rot:", True, (100, 100, 100))
+        # Label color
+        if is_editing:
+            label_color = (100, 100, 200)
+            label_text = label_text + " (EDIT)"
+        else:
+            label_color = (100, 100, 100)
+
+        label = self.font.render(label_text, True, label_color)
         self.screen.blit(label, (x_start, y_start))
         y_start += 25
 
+        # Draw column color indicators (top)
+        for j in range(self.n_species):
+            cx = x_start + j * cell_size + cell_size // 2 - 1
+            cy = y_start - 10
+            pygame.draw.circle(self.screen, self.colors[j], (cx, cy), color_indicator_size // 2)
+            pygame.draw.circle(self.screen, (100, 100, 100), (cx, cy), color_indicator_size // 2, 1)
+
         for i in range(self.n_species):
+            # Draw row color indicator (left side)
+            rx = x_start - 15
+            ry = y_start + i * cell_size + cell_size // 2 - 1
+            pygame.draw.circle(self.screen, self.colors[i], (rx, ry), color_indicator_size // 2)
+            pygame.draw.circle(self.screen, (100, 100, 100), (rx, ry), color_indicator_size // 2, 1)
+
             for j in range(self.n_species):
                 x = x_start + j * cell_size
                 y = y_start + i * cell_size
-                value = self.alignment_matrix[i, j]
+                value = matrix[i, j]
 
                 # Color based on value
                 if value > 0.01:
@@ -405,13 +426,46 @@ class MultiSpeciesDemo(ParticleLife):
                     color = (180, 180, 180)
 
                 pygame.draw.rect(self.screen, color, (x, y, cell_size - 2, cell_size - 2))
-                pygame.draw.rect(self.screen, (200, 200, 200),
-                               (x, y, cell_size - 2, cell_size - 2), 1)
+
+                # Highlight selected cell in edit mode
+                if is_editing and i == self.edit_row and j == self.edit_col:
+                    pygame.draw.rect(self.screen, (255, 255, 0),
+                                   (x, y, cell_size - 2, cell_size - 2), 3)
+                else:
+                    pygame.draw.rect(self.screen, (200, 200, 200),
+                                   (x, y, cell_size - 2, cell_size - 2), 1)
 
                 # Always show value text
                 val_text = self.font.render(f"{value:.1f}", True, (255, 255, 255))
                 text_rect = val_text.get_rect(center=(x + cell_size//2 - 1, y + cell_size//2 - 1))
                 self.screen.blit(val_text, text_rect)
+
+        return y_start + self.n_species * cell_size
+
+    def draw_matrix_viz(self):
+        """Draw visualization of both K_rot and K_pos matrices."""
+        cell_size = 35
+        x_start = self.config.width - 30 - self.n_species * cell_size
+        y_start = 10
+
+        # Draw K_rot matrix
+        is_editing_krot = self.matrix_edit_mode and self.editing_k_rot
+        y_after_krot = self.draw_single_matrix(
+            self.alignment_matrix, "K_rot:", x_start, y_start, is_editing_krot
+        )
+
+        # Draw K_pos matrix below K_rot
+        y_pos_start = y_after_krot + 20
+        is_editing_kpos = self.matrix_edit_mode and not self.editing_k_rot
+        y_after_kpos = self.draw_single_matrix(
+            self.matrix, "K_pos:", x_start, y_pos_start, is_editing_kpos
+        )
+
+        # Draw edit mode instructions
+        if self.matrix_edit_mode:
+            instr_y = y_after_kpos + 10
+            instr = self.font.render("WASD:move E/X:+/- TAB:switch M:exit", True, (100, 100, 100))
+            self.screen.blit(instr, (x_start - 50, instr_y))
 
     def change_species_count(self, new_count: int):
         """Change the number of species and reinitialize."""
@@ -445,6 +499,21 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Reset control state
         self.turn_input = 0.0
+        self.edit_row = 0
+        self.edit_col = 0
+
+    def _adjust_matrix_value(self, delta: float):
+        """Adjust the selected matrix cell value."""
+        if self.editing_k_rot:
+            current = self.alignment_matrix[self.edit_row, self.edit_col]
+            new_val = np.clip(current + delta, -1.0, 1.0)
+            self.alignment_matrix[self.edit_row, self.edit_col] = new_val
+            print(f"K_rot[{self.edit_row},{self.edit_col}] = {new_val:.2f}")
+        else:
+            current = self.matrix[self.edit_row, self.edit_col]
+            new_val = np.clip(current + delta, -1.0, 1.0)
+            self.matrix[self.edit_row, self.edit_col] = new_val
+            print(f"K_pos[{self.edit_row},{self.edit_col}] = {new_val:.2f}")
 
     def handle_events(self) -> bool:
         """Handle pygame events."""
@@ -470,11 +539,39 @@ class MultiSpeciesDemo(ParticleLife):
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations
 
+                elif event.key == pygame.K_h:
+                    self.hide_gui = not self.hide_gui
+
                 elif event.key == pygame.K_c:
                     self.converge_active = True
                     print("Converge: ON")
 
-                # Species count adjustment
+                # Matrix editing controls
+                elif event.key == pygame.K_m:
+                    self.matrix_edit_mode = not self.matrix_edit_mode
+                    print(f"Matrix edit mode: {'ON' if self.matrix_edit_mode else 'OFF'}")
+
+                elif event.key == pygame.K_TAB and self.matrix_edit_mode:
+                    self.editing_k_rot = not self.editing_k_rot
+                    print(f"Editing: {'K_rot' if self.editing_k_rot else 'K_pos'}")
+
+                elif self.matrix_edit_mode:
+                    # WASD navigation
+                    if event.key == pygame.K_w:
+                        self.edit_row = max(0, self.edit_row - 1)
+                    elif event.key == pygame.K_s:
+                        self.edit_row = min(self.n_species - 1, self.edit_row + 1)
+                    elif event.key == pygame.K_a:
+                        self.edit_col = max(0, self.edit_col - 1)
+                    elif event.key == pygame.K_d:
+                        self.edit_col = min(self.n_species - 1, self.edit_col + 1)
+                    # E/X or +/- to adjust value
+                    elif event.key == pygame.K_e or event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
+                        self._adjust_matrix_value(0.1)
+                    elif event.key == pygame.K_x or event.key == pygame.K_MINUS:
+                        self._adjust_matrix_value(-0.1)
+
+                # Species count adjustment (only when not in matrix edit mode)
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     self.change_species_count(self.n_species + 1)
 
@@ -518,7 +615,7 @@ class MultiSpeciesDemo(ParticleLife):
 
 
 def main():
-    demo = MultiSpeciesDemo(n_species=3, n_particles=150)
+    demo = MultiSpeciesDemo(n_species=4, n_particles=150)
     demo.run()
 
 
