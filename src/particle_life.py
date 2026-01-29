@@ -18,15 +18,15 @@ from datetime import datetime
 @dataclass
 class Config:
     """Simulation configuration"""
-    width: int = 1000
-    height: int = 1000
+    width: int = 2000
+    height: int = 2000
     init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
     n_species: int = 2
     n_particles: int = 90
     dt: float = 0.1  # Timestep - increase for faster simulation (was 0.05)
     max_speed: float = 300.0
-    a_rep: float = 5.0
-    a_att: float = 2.0
+    a_rep: float = 10.0
+    a_att: float = 1.0
     seed: int = 42
     max_angular_speed: float = 20.0  # Max angular velocity (radians/sec)
     a_rot: float = 5  # Strength of orientation alignment
@@ -463,9 +463,16 @@ class ParticleLife:
                 r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
                 t_hat_x, t_hat_y = -dy * inv_r, dx * inv_r
 
-                # ---- radial part: attraction - repulsion (along r̂) ----
+                # ---- distance weights ----
+                # r0 = 10.0  # characteristic distance for decay
+                # att_weight = r0 / (r + r0)  # ~1 at close range, decays for far
+                # rep_weight = 1.0 / np.sqrt(r**2 + 1e-6)  # strong at close range
+
+                weight = 1.0 / np.sqrt(r**2 + 1e-6)
+
+                # ---- radial part: attraction (far-decay) - repulsion (close-strong) ----
                 attraction = k_pos * self.config.a_att
-                repulsion  = self.config.a_rep / np.sqrt(r + 1e-6)
+                repulsion  = self.config.a_rep * weight
                 radial_mag = attraction - repulsion
                 velocity_sum[0] += radial_mag * r_hat_x
                 velocity_sum[1] += radial_mag * r_hat_y
@@ -473,7 +480,7 @@ class ParticleLife:
                 # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
                 omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
                                     -1.0, 1.0)
-                swirl_gain = - 10 * k_rot * omega_norm * (self.config.a_rot / (r + 1e-6))
+                swirl_gain = -10 * k_rot * omega_norm * self.config.a_rot * weight
 
                 velocity_sum[0] += swirl_gain * t_hat_x
                 velocity_sum[1] += swirl_gain * t_hat_y

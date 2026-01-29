@@ -32,27 +32,15 @@ def generate_translation_matrix(n_species: int, strength: float) -> np.ndarray:
     """
     Generate K_rot matrix for forward translation.
 
-    ALL species pairs interact (not just neighbors) to ensure coordinated
-    forward motion even for large species counts. Strength is inversely
-    proportional to distance in the line.
-
-    Opposite signs (antisymmetric) create net translation:
-    - K[i,j] = +s/dist for j > i (species ahead push forward)
-    - K[i,j] = -s/dist for j < i (species behind push forward)
+    Only adjacent species pairs are coupled (like joints in a chain).
+    Antisymmetric: K[i, i+1] = +strength, K[i+1, i] = -strength
+    This creates net forward motion along the chain.
     """
     K = np.zeros((n_species, n_species))
 
-    for i in range(n_species):
-        for j in range(n_species):
-            if i != j:
-                dist = abs(i - j)
-                weight = 1.0 / dist  # Stronger coupling for closer pairs
-
-                # Opposite signs based on relative position
-                if j > i:
-                    K[i, j] = +strength * weight
-                else:
-                    K[i, j] = -strength * weight
+    for i in range(n_species - 1):
+        K[i, i + 1] = +strength  # 前一个对后一个：正
+        K[i + 1, i] = -strength  # 后一个对前一个：负
 
     return K
 
@@ -61,23 +49,17 @@ def generate_rotation_matrix(n_species: int, strength: float) -> np.ndarray:
     """
     Generate K_rot matrix for collective rotation.
 
-    ALL species pairs interact with uniform strength to ensure coordinated
-    rotation of the entire formation as a rigid body. The physics engine's
-    built-in 1/r distance weighting handles the velocity gradient naturally.
-
-    Same signs (symmetric) create rotation:
-    - K[i,j] = K[j,i] = strength for all pairs
+    Only adjacent species pairs are coupled (like joints in a chain).
+    Symmetric: K[i, i+1] = K[i+1, i] = strength
     """
     K = np.zeros((n_species, n_species))
 
     if n_species <= 1:
         return K
 
-    # Full coupling - all species influence each other
-    for i in range(n_species):
-        for j in range(n_species):
-            if i != j:
-                K[i, j] = strength
+    for i in range(n_species - 1):
+        K[i, i + 1] = strength
+        K[i + 1, i] = strength
 
     return K
 
@@ -113,8 +95,8 @@ class MultiSpeciesDemo(ParticleLife):
     def __init__(self, n_species: int = 3, n_particles: int = 150):
         # Create config with initial species count
         config = Config(
-            width=1000,
-            height=800,
+            width=2000,
+            height=2000,
             n_particles=n_particles,
             n_species=n_species,
             position_matrix=generate_position_matrix(n_species).tolist(),
