@@ -73,18 +73,16 @@ def generate_u_pattern(n_joints: int) -> np.ndarray:
 def generate_m_pattern(n_joints: int) -> np.ndarray:
     """
     Generate M-shape joint pattern (two peaks pointing up).
-    Pattern: -, +, +, - (two upward peaks)
+    Pattern: -, -, +, +, -, -, +, + (inverted from W)
     """
-    pattern = -np.ones(n_joints)  # Start with all negative
+    pattern = -np.ones(n_joints)
     if n_joints < 4:
         return pattern
 
     quarter = n_joints // 4
-    # First quarter: - (initial down slope)
-    # Second quarter: + (up to first peak)
-    # Third quarter: + (up to second peak)
-    # Fourth quarter: - (final down slope)
-    pattern[quarter:3*quarter] = 1
+    # Flip: middle sections positive
+    pattern[quarter:2*quarter] = 1
+    pattern[3*quarter:] = 1
 
     return pattern
 
