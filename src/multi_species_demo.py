@@ -95,8 +95,6 @@ class MultiSpeciesDemo(ParticleLife):
     def __init__(self, n_species: int = 3, n_particles: int = 150):
         # Create config with initial species count
         config = Config(
-            width=2000,
-            height=2000,
             n_particles=n_particles,
             n_species=n_species,
             position_matrix=generate_position_matrix(n_species).tolist(),

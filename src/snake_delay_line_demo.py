@@ -38,7 +38,7 @@ from particle_life import Config, ParticleLife
 # =============================================================================
 
 # Chain structure
-S = 9                   # Number of species (segments), species 0 is head
+S = 5                   # Number of species (segments), species 0 is head
 P = 30                  # Particles per species
 L = 100.0               # Spacing between segment centroids
 
@@ -49,7 +49,7 @@ TAIL_SCALE = 0.7        # Taper factor for tail (1.0 = no taper)
 U_CLIP = 1.0            # Max absolute value for joint control
 
 # Forward motion
-BASE_FORWARD = 0.5      # Base forward speed (K_rot antisymmetric strength)
+BASE_FORWARD = 0.0      # Base forward speed (K_rot antisymmetric strength) - 0 to stay in place
 
 # K_pos parameters (fixed)
 K_SELF = 0.6            # Self-cohesion (diagonal)

@@ -18,8 +18,8 @@ from datetime import datetime
 @dataclass
 class Config:
     """Simulation configuration"""
-    width: int = 2000
-    height: int = 2000
+    width: int = 1500
+    height: int = 800
     init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
     n_species: int = 2
     n_particles: int = 90
