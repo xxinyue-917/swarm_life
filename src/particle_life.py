@@ -33,6 +33,7 @@ class Config:
     r_max: float = 2.0             # interaction radius in meters
     beta: float = 0.2              # repulsion threshold (dimensionless)
     force_scale: float = 0.5       # force multiplier
+    far_attraction: float = 0.1    # long-range attraction strength beyond r_max (0 = no long-range)
     seed: int = 42
     max_angular_speed: float = 20.0
     a_rot: float = 5.0
@@ -447,12 +448,17 @@ class ParticleLife:
             pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_SIZENS)
 
     def compute_velocities(self) -> tuple:
-        """Compute velocities using piecewise-linear force kernel.
+        """Compute velocities using continuous four-zone force kernel.
 
-        F(r,a) = { r/β - 1,                           r < β
-                 { a·(1 - |2r-1-β|/(1-β)),            β ≤ r < 1
-                 { 0,                                  r ≥ 1
+        Let tri(r) = 1 - |2r-1-β|/(1-β), fa = far_attraction, r_p = (1+β)/2
+
+        F(r,a) = { r/β - 1,                           r < β         (repulsion)
+                 { a·tri(r),                           β ≤ r < r_p   (rising triangle)
+                 { a·max(fa, tri(r)),                  r_p ≤ r < 1   (falling + floor)
+                 { a·fa,                               r ≥ 1         (constant long-range)
+
         where r is normalized distance (raw/r_max), a is k_pos matrix value.
+        All boundaries are continuous. Set far_attraction=0 to disable zones 3-4 floor.
         """
         new_velocities = np.zeros_like(self.velocities)
         new_angular_velocities = np.zeros(self.n)
@@ -461,6 +467,7 @@ class ParticleLife:
         beta = self.config.beta
         inv_1_minus_beta = 1.0 / (1.0 - beta) if beta < 1.0 else 1.0
         force_scale = self.config.force_scale
+        far_attraction = self.config.far_attraction
 
         for i in range(self.n):
             # Vector from particle i to all others
@@ -477,10 +484,21 @@ class ParticleLife:
                     continue  # Skip self-interaction
                 r = dist[j]
                 r_norm = r / r_max
-                if r_norm >= 1.0:
-                    continue  # No interaction beyond r_max
 
                 dx, dy = delta[j]
+
+                if r_norm >= 1.0:
+                    # ---- Long-range attraction beyond r_max ----
+                    if far_attraction > 0:
+                        si = self.species[i]; sj = self.species[j]
+                        k_pos = self.matrix[si, sj]
+                        inv_r = 1.0 / (r + 1e-8)
+                        r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
+                        # Constant attraction beyond r_max
+                        F = k_pos * far_attraction
+                        velocity_sum[0] += force_scale * F * r_hat_x
+                        velocity_sum[1] += force_scale * F * r_hat_y
+                    continue
 
                 # Species lookups
                 si = self.species[i]; sj = self.species[j]
@@ -492,11 +510,19 @@ class ParticleLife:
                 r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
                 t_hat_x, t_hat_y = -r_hat_y, r_hat_x
 
-                # ---- Piecewise linear radial force ----
+                # ---- Piecewise linear radial force (4 zones) ----
                 if r_norm < beta:
+                    # Zone 1: universal repulsion
                     F = r_norm / beta - 1.0
                 else:
-                    F = k_pos * (1.0 - abs(2.0 * r_norm - 1.0 - beta) * inv_1_minus_beta)
+                    triangle = 1.0 - abs(2.0 * r_norm - 1.0 - beta) * inv_1_minus_beta
+                    peak_r = 0.5 * (1.0 + beta)
+                    if r_norm < peak_r:
+                        # Zone 2: rising triangle (no floor, continuous from zone 1)
+                        F = k_pos * triangle
+                    else:
+                        # Zone 3/4: falling triangle with floor
+                        F = k_pos * max(far_attraction, triangle)
 
                 velocity_sum[0] += force_scale * F * r_hat_x
                 velocity_sum[1] += force_scale * F * r_hat_y
