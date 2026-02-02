@@ -96,7 +96,7 @@ class ScalarPID:
 class PathGenerator:
     """Generates waypoints along predefined path shapes."""
 
-    def __init__(self, center: np.ndarray, scale: float = 200.0):
+    def __init__(self, center: np.ndarray, scale: float = 3.0):
         self.center = center
         self.scale = scale
 
@@ -186,7 +186,7 @@ class WaypointDemo(ParticleLife):
             config = Config(
                 width=1000,
                 height=1000,
-                n_particles=100,
+                n_particles=50,
                 n_species=2,
                 # Position matrix: two cohesive groups with moderate cross-attraction
                 position_matrix=[[0.6, 0.3], [0.3, 0.6]],
@@ -197,16 +197,16 @@ class WaypointDemo(ParticleLife):
         # Initialize base simulation
         super().__init__(config, headless=False)
 
-        # Path generator
+        # Path generator (in meters)
         self.path_generator = PathGenerator(
-            center=np.array([config.width / 2, config.height / 2]),
-            scale=250.0
+            center=np.array([config.sim_width / 2, config.sim_height / 2]),
+            scale=3.0
         )
 
         # Waypoint settings
         self.path_type = "spiral"
         self.n_waypoints = 25
-        self.waypoint_threshold = 10.0  # Distance to consider waypoint "reached"
+        self.waypoint_threshold = 0.5  # Distance to consider waypoint "reached" (meters)
         self.waypoints = []
         self.current_waypoint_idx = 0
         self.waypoints_completed = 0  # Total waypoints reached (for stats)
@@ -226,15 +226,15 @@ class WaypointDemo(ParticleLife):
         )
 
         # Speed PID: controls speed factor based on distance to waypoint
-        # - Input: distance in pixels (always positive)
-        #   Range: [0, ~500] typically
+        # - Input: distance in meters (always positive)
+        #   Range: [0, ~10] typically
         # - Output: speed_factor multiplier for base_k_rot
         #   Target range: [0.3, 1.5]
         self.speed_pid = ScalarPID(
-            kp=0.008,         # Maps ~100px distance to ~0.8 speed factor contribution
-            ki=0.0005,        # Slowly increase effort if stuck far away
-            kd=0.002,         # Reduce speed when approaching quickly (prevents overshoot)
-            integral_limit=50.0
+            kp=0.4,           # Maps ~2m distance to ~0.8 speed factor contribution
+            ki=0.02,          # Slowly increase effort if stuck far away
+            kd=0.1,           # Reduce speed when approaching quickly (prevents overshoot)
+            integral_limit=5.0
         )
 
         self.pid_enabled = True
@@ -268,8 +268,8 @@ class WaypointDemo(ParticleLife):
 
     def _initialize_two_groups(self):
         """Initialize particles as two separated groups."""
-        center = np.array([self.config.width / 2, self.config.height / 2])
-        group_offset = 50
+        center = np.array([self.config.sim_width / 2, self.config.sim_height / 2])
+        group_offset = 0.5  # meters
         particles_per_species = self.n // self.n_species
 
         for i in range(self.n):
@@ -281,12 +281,12 @@ class WaypointDemo(ParticleLife):
             else:
                 group_center = center + np.array([group_offset, 0])
 
-            self.positions[i] = group_center + self.rng.uniform(-30, 30, 2)
+            self.positions[i] = group_center + self.rng.uniform(-0.3, 0.3, 2)
 
     def get_current_target(self) -> np.ndarray:
         """Get current waypoint position."""
         if len(self.waypoints) == 0:
-            return np.array([self.config.width / 2, self.config.height / 2])
+            return np.array([self.config.sim_width / 2, self.config.sim_height / 2])
         return self.waypoints[self.current_waypoint_idx]
 
     def check_waypoint_reached(self) -> bool:
@@ -351,7 +351,7 @@ class WaypointDemo(ParticleLife):
         current_speed = np.linalg.norm(avg_velocity)
 
         # Use velocity direction if moving, otherwise use direction between species centroids
-        if current_speed > 5.0:
+        if current_speed > 0.1:
             # Moving fast enough - use velocity direction
             current_direction = avg_velocity / current_speed
         else:
@@ -450,52 +450,57 @@ class WaypointDemo(ParticleLife):
         if self.show_path:
             self.draw_path_and_waypoints()
 
-        # Draw particles
+        # Draw particles (meters → pixels via ppu)
         for i in range(self.n):
             color = self.colors[self.species[i]]
             pos = self.positions[i]
-            x = int(pos[0] * self.zoom)
-            y = int(pos[1] * self.zoom)
+            x = int(pos[0] * self.ppu * self.zoom)
+            y = int(pos[1] * self.ppu * self.zoom)
 
             if self.show_orientations:
                 angle = self.orientations[i]
-                radius = 5 * self.zoom
+                radius = 0.05 * self.ppu * self.zoom
                 pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
                 line_length = radius * 0.8
                 end_x = x + line_length * np.cos(angle)
                 end_y = y + line_length * np.sin(angle)
                 pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y), max(1, int(self.zoom)))
             else:
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(4 * self.zoom)))
+                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
 
-        # Draw swarm centroid
-        centroid = self.get_swarm_centroid().astype(int)
-        pygame.draw.circle(self.screen, (0, 0, 0), centroid, 8, 2)
+        # Draw swarm centroid (meters → pixels)
+        centroid = self.get_swarm_centroid()
+        cx = int(centroid[0] * self.ppu * self.zoom)
+        cy = int(centroid[1] * self.ppu * self.zoom)
+        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
 
         # Draw info panel
         if self.show_info:
             self.draw_info_panel()
+
+    def _to_screen(self, pos_m: np.ndarray) -> tuple:
+        """Convert meter position to screen pixels."""
+        return (int(pos_m[0] * self.ppu * self.zoom),
+                int(pos_m[1] * self.ppu * self.zoom))
 
     def draw_path_and_waypoints(self):
         """Draw the path line and waypoints."""
         if len(self.waypoints) < 2:
             return
 
-        # Draw path line connecting waypoints
-        points = [wp.astype(int).tolist() for wp in self.waypoints]
+        # Draw path line connecting waypoints (meters → pixels)
+        points = [list(self._to_screen(wp)) for wp in self.waypoints]
         pygame.draw.lines(self.screen, self.path_color, True, points, 2)
 
         # Draw waypoints
         for i, wp in enumerate(self.waypoints):
-            pos = wp.astype(int)
+            pos = self._to_screen(wp)
 
             if i == self.current_waypoint_idx:
-                # Current target - large red circle
                 pygame.draw.circle(self.screen, self.current_wp_color, pos, 12)
                 pygame.draw.circle(self.screen, (255, 255, 255), pos, 8)
                 pygame.draw.circle(self.screen, self.current_wp_color, pos, 4)
             else:
-                # Other waypoints - small gray circles
                 pygame.draw.circle(self.screen, self.waypoint_color, pos, 6)
                 pygame.draw.circle(self.screen, (255, 255, 255), pos, 4)
 
@@ -504,9 +509,9 @@ class WaypointDemo(ParticleLife):
             self.screen.blit(text, (pos[0] + 10, pos[1] - 10))
 
         # Draw line from centroid to current target
-        centroid = self.get_swarm_centroid().astype(int)
-        target = self.get_current_target().astype(int)
-        pygame.draw.line(self.screen, (255, 200, 200), tuple(centroid), tuple(target), 1)
+        centroid_px = self._to_screen(self.get_swarm_centroid())
+        target_px = self._to_screen(self.get_current_target())
+        pygame.draw.line(self.screen, (255, 200, 200), centroid_px, target_px, 1)
 
     def draw_info_panel(self):
         """Draw information panel."""
@@ -519,8 +524,8 @@ class WaypointDemo(ParticleLife):
             f"Path: {self.path_type.upper()}",
             f"Waypoint: {self.current_waypoint_idx + 1}/{len(self.waypoints)}",
             f"Total Reached: {self.waypoints_completed}",
-            f"Distance to WP: {distance:.0f} px",
-            f"Threshold: {self.waypoint_threshold:.0f} px",
+            f"Distance to WP: {distance:.2f} m",
+            f"Threshold: {self.waypoint_threshold:.2f} m",
             f"PID: {'ON' if self.pid_enabled else 'OFF'}",
             f"K_rot: [{self.alignment_matrix[0,1]:.2f}, {self.alignment_matrix[1,0]:.2f}]",
             "",
@@ -661,12 +666,12 @@ class WaypointDemo(ParticleLife):
 
                 # Adjust waypoint threshold
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
-                    self.waypoint_threshold = min(150, self.waypoint_threshold + 10)
-                    print(f"Waypoint threshold: {self.waypoint_threshold:.0f} px")
+                    self.waypoint_threshold = min(2.0, self.waypoint_threshold + 0.1)
+                    print(f"Waypoint threshold: {self.waypoint_threshold:.2f} m")
 
                 elif event.key == pygame.K_MINUS:
-                    self.waypoint_threshold = max(20, self.waypoint_threshold - 10)
-                    print(f"Waypoint threshold: {self.waypoint_threshold:.0f} px")
+                    self.waypoint_threshold = max(0.1, self.waypoint_threshold - 0.1)
+                    print(f"Waypoint threshold: {self.waypoint_threshold:.2f} m")
 
         return True
 

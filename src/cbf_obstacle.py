@@ -22,13 +22,13 @@ class CircularObstacle:
     Circular obstacle with safety margin.
 
     Attributes:
-        center: [x, y] position of obstacle center
-        radius: obstacle radius in pixels
-        safety_margin: additional buffer distance (δ)
+        center: [x, y] position of obstacle center (meters)
+        radius: obstacle radius in meters
+        safety_margin: additional buffer distance in meters (δ)
     """
     center: np.ndarray
     radius: float
-    safety_margin: float = 20.0
+    safety_margin: float = 0.2
 
     def __post_init__(self):
         self.center = np.array(self.center, dtype=float)
@@ -79,12 +79,12 @@ class CBFConfig:
     alpha: float = 1.0
 
     # Control effectiveness (maps control to velocity change)
-    b_long: float = 50.0   # longitudinal gain
-    b_lat: float = 30.0    # lateral gain
+    b_long: float = 0.5    # longitudinal gain (meters)
+    b_lat: float = 0.3     # lateral gain (meters)
 
-    # Activation thresholds
-    activation_distance: float = 150.0
-    tangent_blend_distance: float = 200.0
+    # Activation thresholds (meters)
+    activation_distance: float = 1.5
+    tangent_blend_distance: float = 2.0
 
     # Tangent navigation
     tangent_gain: float = 0.8
@@ -106,7 +106,7 @@ class ObstacleManager:
         self.obstacles: List[CircularObstacle] = []
 
     def add_obstacle(self, center: np.ndarray, radius: float,
-                     safety_margin: float = 20.0) -> int:
+                     safety_margin: float = 0.2) -> int:
         """
         Add obstacle and return its index.
 

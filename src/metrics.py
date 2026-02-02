@@ -181,7 +181,7 @@ def angular_momentum_normalized(X, V):
 # NEW METRICS: Mixing Index (M) - Species Intermixing
 # =============================================================================
 
-def mixing_index(X, species, n_species, r_mix=50.0):
+def mixing_index(X, species, n_species, r_mix=0.5):
     """
     Compute mixing index based on local species entropy.
 
@@ -192,7 +192,7 @@ def mixing_index(X, species, n_species, r_mix=50.0):
         X: positions [N, 2]
         species: species labels [N]
         n_species: number of species
-        r_mix: neighborhood radius for mixing calculation
+        r_mix: neighborhood radius for mixing calculation (meters)
 
     Returns:
         float: Mean local entropy (0 = segregated, log(n_species) = fully mixed)
@@ -223,7 +223,7 @@ def mixing_index(X, species, n_species, r_mix=50.0):
     return float(np.mean(entropies))
 
 
-def mixing_index_normalized(X, species, n_species, r_mix=50.0):
+def mixing_index_normalized(X, species, n_species, r_mix=0.5):
     """
     Normalized mixing index [0, 1].
 
@@ -247,14 +247,14 @@ def mixing_index_normalized(X, species, n_species, r_mix=50.0):
 # NEW METRICS: Cluster Count (C) - Number of Distinct Groups
 # =============================================================================
 
-def cluster_count_simple(X, threshold=50.0):
+def cluster_count_simple(X, threshold=0.5):
     """
     Simple cluster count using connected components.
     Two particles are connected if distance < threshold.
 
     Args:
         X: positions [N, 2]
-        threshold: maximum distance for connection
+        threshold: maximum distance for connection (meters)
 
     Returns:
         int: Number of clusters
@@ -289,7 +289,7 @@ def cluster_count_simple(X, threshold=50.0):
     return n_clusters
 
 
-def cluster_count_dbscan(X, eps=30.0, min_samples=3):
+def cluster_count_dbscan(X, eps=0.3, min_samples=3):
     """
     Count clusters using DBSCAN.
 
@@ -504,7 +504,7 @@ def centroid_velocity_vector(V):
 # =============================================================================
 
 def compute_all_metrics(X, V, species, n_species, orientations=None, angular_velocities=None,
-                        r_mix=50.0, cluster_threshold=50.0):
+                        r_mix=0.5, cluster_threshold=0.5):
     """
     Compute all metrics for a simulation snapshot.
 

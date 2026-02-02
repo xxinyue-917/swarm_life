@@ -16,7 +16,6 @@ Controls:
     ←/→: Turn left/right
     ↑/↓: Speed up/slow down
     +/-: Add/remove species (2-10)
-    C: Converge formation
     R: Reset positions
     SPACE: Pause/Resume
     I: Toggle info panel
@@ -66,7 +65,7 @@ def generate_rotation_matrix(n_species: int, strength: float) -> np.ndarray:
 
 def generate_position_matrix(n_species: int,
                              self_cohesion: float = 0.6,
-                             cross_attraction: float = 0.4) -> np.ndarray:
+                             cross_attraction: float = 0.1) -> np.ndarray:
     """
     Generate K_pos matrix for species cohesion.
 
@@ -92,7 +91,7 @@ class MultiSpeciesDemo(ParticleLife):
     Arrow keys control turn and speed via K_rot matrix manipulation.
     """
 
-    def __init__(self, n_species: int = 3, n_particles: int = 150):
+    def __init__(self, n_species: int = 3, n_particles: int = 20):
         # Create config with initial species count
         config = Config(
             n_particles=n_particles,
@@ -114,12 +113,7 @@ class MultiSpeciesDemo(ParticleLife):
         self.speed_decay = 0.98     # How quickly speed input stabilizes
 
         # Formation parameters
-        self.group_spacing = 80     # Pixels between species group centers
-
-        # Converge mode
-        self.converge_active = False
-        self.normal_cross_attraction = 0.4  # Increased for better line cohesion
-        self.converge_cross_attraction = 0.6
+        self.group_spacing = 1.0    # Meters between species group centers
 
         # Matrix editing mode
         self.matrix_edit_mode = False
@@ -148,7 +142,6 @@ class MultiSpeciesDemo(ParticleLife):
         print("  ←/→     Turn left/right")
         print("  ↑/↓     Speed up/slow down")
         print("  +/-     Add/remove species")
-        print("  C       Hold to converge formation")
         print("  R       Reset positions")
         print("  SPACE   Pause")
         print("  H       Hide/show all GUI")
@@ -163,8 +156,8 @@ class MultiSpeciesDemo(ParticleLife):
 
     def _initialize_side_by_side(self):
         """Arrange species in horizontal line formation."""
-        center_x = self.config.width / 2
-        center_y = self.config.height / 2
+        center_x = self.config.sim_width / 2
+        center_y = self.config.sim_height / 2
 
         # Calculate total width of formation
         total_width = (self.n_species - 1) * self.group_spacing
@@ -176,16 +169,16 @@ class MultiSpeciesDemo(ParticleLife):
             species_id = min(i // particles_per_species, self.n_species - 1)
             self.species[i] = species_id
 
-            # Group center for this species
+            # Group center for this species (meters)
             group_center_x = start_x + species_id * self.group_spacing
             group_center_y = center_y
 
-            # Random offset within group
-            self.positions[i, 0] = group_center_x + self.rng.uniform(-20, 20)
-            self.positions[i, 1] = group_center_y + self.rng.uniform(-20, 20)
+            # Random offset within group (meters)
+            self.positions[i, 0] = group_center_x + self.rng.uniform(-0.2, 0.2)
+            self.positions[i, 1] = group_center_y + self.rng.uniform(-0.2, 0.2)
 
             # Initial velocity (slight forward motion)
-            self.velocities[i] = np.array([0.0, -1.0])  # Moving up initially
+            self.velocities[i] = np.array([0.0, -0.1])
 
     def _update_base_matrices(self):
         """Pre-compute translation base matrix (rotation computed dynamically)."""
@@ -229,16 +222,6 @@ class MultiSpeciesDemo(ParticleLife):
             for j in range(self.n_species):
                 self.alignment_matrix[i, j] = np.clip(K_blended[i, j], -1.0, 1.0)
 
-        # K_pos only changes when converge mode is active (C key held)
-        cross_attraction = (self.converge_cross_attraction if self.converge_active
-                           else self.normal_cross_attraction)
-        for i in range(self.n_species):
-            for j in range(self.n_species):
-                if abs(i - j) == 1:  # Only neighbors
-                    self.matrix[i, j] = cross_attraction
-                elif i != j:
-                    self.matrix[i, j] = 0.0  # Non-neighbors don't attract
-
     def step(self):
         """Perform one simulation step with control updates."""
         if self.paused:
@@ -259,16 +242,16 @@ class MultiSpeciesDemo(ParticleLife):
         """Draw the simulation with control overlay."""
         self.screen.fill((255, 255, 255))
 
-        # Draw particles
+        # Draw particles (meters → pixels via ppu)
         for i in range(self.n):
             color = self.colors[self.species[i]]
             pos = self.positions[i]
-            x = int(pos[0] * self.zoom)
-            y = int(pos[1] * self.zoom)
+            x = int(pos[0] * self.ppu * self.zoom)
+            y = int(pos[1] * self.ppu * self.zoom)
 
             if self.show_orientations:
                 angle = self.orientations[i]
-                radius = 5 * self.zoom
+                radius = 0.05 * self.ppu * self.zoom
                 pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
                 line_length = radius * 0.8
                 end_x = x + line_length * np.cos(angle)
@@ -276,15 +259,17 @@ class MultiSpeciesDemo(ParticleLife):
                 pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y),
                                max(1, int(self.zoom)))
             else:
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(4 * self.zoom)))
+                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
 
         # Skip GUI elements if hidden
         if self.hide_gui:
             return
 
-        # Draw swarm centroid
-        centroid = self.get_swarm_centroid().astype(int)
-        pygame.draw.circle(self.screen, (0, 0, 0), tuple(centroid), 8, 2)
+        # Draw swarm centroid (meters → pixels)
+        centroid = self.get_swarm_centroid()
+        cx = int(centroid[0] * self.ppu * self.zoom)
+        cy = int(centroid[1] * self.ppu * self.zoom)
+        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
 
         # Draw control indicators
         self.draw_control_indicator()
@@ -334,13 +319,11 @@ class MultiSpeciesDemo(ParticleLife):
             "",
             f"Turn Input: {self.turn_input:+.2f}",
             f"Speed Input: {self.speed_input:.2f}",
-            f"Converge: {'ON' if self.converge_active else 'OFF'}",
             "",
             "Controls:",
             "←/→: Turn left/right",
             "↑/↓: Speed up/down",
             "+/-: Add/remove species",
-            "C: Hold to converge",
             "R: Reset  SPACE: Pause",
             "I: Toggle info  Q: Quit",
         ]
@@ -458,6 +441,7 @@ class MultiSpeciesDemo(ParticleLife):
         # Update config
         self.config.n_species = new_count
         self.n_species = new_count
+        self.n = self.config.n_particles * self.n_species
 
         # Regenerate matrices
         self.matrix = generate_position_matrix(new_count)
@@ -474,13 +458,16 @@ class MultiSpeciesDemo(ParticleLife):
             color.hsva = (hue * 360, 70, 90, 100)
             self.colors.append((color.r, color.g, color.b))
 
-        # Reinitialize particle positions
+        # Reinitialize particles (reallocates arrays for new total)
+        self.initialize_particles()
         self._initialize_side_by_side()
 
         # Reset control state
         self.turn_input = 0.0
         self.edit_row = 0
         self.edit_col = 0
+
+        print(f"Species: {self.n_species} x {self.config.n_particles} = {self.n} particles")
 
     def _adjust_matrix_value(self, delta: float):
         """Adjust the selected matrix cell value."""
@@ -522,10 +509,6 @@ class MultiSpeciesDemo(ParticleLife):
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui
 
-                elif event.key == pygame.K_c:
-                    self.converge_active = True
-                    print("Converge: ON")
-
                 # Matrix editing controls
                 elif event.key == pygame.K_m:
                     self.matrix_edit_mode = not self.matrix_edit_mode
@@ -557,11 +540,6 @@ class MultiSpeciesDemo(ParticleLife):
 
                 elif event.key == pygame.K_MINUS:
                     self.change_species_count(self.n_species - 1)
-
-            elif event.type == pygame.KEYUP:
-                if event.key == pygame.K_c:
-                    self.converge_active = False
-                    print("Converge: OFF")
 
         # Handle held keys for continuous control
         keys = pygame.key.get_pressed()
@@ -595,7 +573,7 @@ class MultiSpeciesDemo(ParticleLife):
 
 
 def main():
-    demo = MultiSpeciesDemo(n_species=4, n_particles=150)
+    demo = MultiSpeciesDemo(n_species=4, n_particles=20)
     demo.run()
 
 

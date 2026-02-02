@@ -31,7 +31,7 @@ from particle_life import Config, ParticleLife
 # Species and particles
 S = 9                # Number of species (chain segments)
 P = 20               # Particles per species
-L = 90.0            # Spacing between species centroids
+L = 1.0             # Spacing between species centroids (meters)
 
 # Simulation
 DT = 0.1             # Timestep
@@ -148,11 +148,10 @@ class UtoMDemo(ParticleLife):
         self.u_U = generate_u_pattern(self.n_joints) * self.u0
         self.u_M = generate_m_pattern(self.n_joints) * self.u0
 
-        # Create config (use defaults from particle_life.py, only override what's needed)
-        n_particles = self.S * self.P
+        # Create config (n_particles is per species)
         config = Config(
             n_species=self.S,
-            n_particles=n_particles,
+            n_particles=self.P,
             dt=DT,
             seed=SEED,
         )
@@ -182,7 +181,7 @@ class UtoMDemo(ParticleLife):
         print("=" * 60)
         print("U-to-M Morphing Demo")
         print("=" * 60)
-        print(f"Species: {self.S}, Particles: {n_particles}")
+        print(f"Species: {self.S}, Particles: {self.P}/species = {self.n} total")
         print(f"Schedule: U={self.T_U}, Morph={self.T_morph}, Hold={self.T_hold}")
         print(f"U-pattern: {self.u_U}")
         print(f"M-pattern: {self.u_M}")
@@ -192,14 +191,14 @@ class UtoMDemo(ParticleLife):
 
     def _initialize_chain(self):
         """Initialize particles as a horizontal chain of clusters."""
-        center_x = self.config.width / 2
-        center_y = self.config.height / 2
+        center_x = self.config.sim_width / 2
+        center_y = self.config.sim_height / 2
         total_width = (self.S - 1) * self.L
         start_x = center_x - total_width / 2
 
         positions = []
         species = []
-        sigma = 30.0  # Spread of particles around centroid
+        sigma = 0.2  # Spread of particles around centroid (meters)
 
         for s in range(self.S):
             cx = start_x + s * self.L
@@ -270,12 +269,13 @@ class UtoMDemo(ParticleLife):
         for i in range(self.n):
             color = self.colors[self.species[i]]
             pos = self.positions[i]
-            x, y = int(pos[0] * self.zoom), int(pos[1] * self.zoom)
-            pygame.draw.circle(self.screen, color, (x, y), max(2, int(8 * self.zoom)))
+            x = int(pos[0] * self.ppu * self.zoom)
+            y = int(pos[1] * self.ppu * self.zoom)
+            pygame.draw.circle(self.screen, color, (x, y), max(2, int(0.06 * self.ppu * self.zoom)))
 
         # Draw centroids and connecting line
         centroids = self.get_species_centroids()
-        centroid_points = [(int(c[0] * self.zoom), int(c[1] * self.zoom)) for c in centroids]
+        centroid_points = [(int(c[0] * self.ppu * self.zoom), int(c[1] * self.ppu * self.zoom)) for c in centroids]
 
         # Draw connecting line
         if len(centroid_points) >= 2:

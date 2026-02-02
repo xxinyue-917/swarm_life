@@ -40,7 +40,7 @@ from particle_life import Config, ParticleLife
 # Chain structure
 S = 5                   # Number of species (segments), species 0 is head
 P = 30                  # Particles per species
-L = 100.0               # Spacing between segment centroids
+L = 1.0                 # Spacing between segment centroids (meters)
 
 # Delay line parameters
 DELAY_STEPS = 15        # Steps delay between each joint
@@ -123,11 +123,10 @@ class SnakeDelayLineDemo(ParticleLife):
         self.P = P
         self.L = L
 
-        # Create config
-        n_particles = self.S * self.P
+        # Create config (n_particles is per species)
         config = Config(
             n_species=self.S,
-            n_particles=n_particles,
+            n_particles=self.P,
             dt=DT,
             seed=SEED,
         )
@@ -178,7 +177,7 @@ class SnakeDelayLineDemo(ParticleLife):
         print("=" * 60)
         print("Snake Delay Line Demo")
         print("=" * 60)
-        print(f"Species: {self.S}, Particles: {n_particles}")
+        print(f"Species: {self.S}, Particles: {self.P}/species = {self.n} total")
         print(f"Delay steps: {self.delay_steps}, History length: {self.hist_len}")
         print("")
         print("Controls:")
@@ -192,14 +191,14 @@ class SnakeDelayLineDemo(ParticleLife):
 
     def _initialize_chain(self):
         """Initialize particles as a horizontal chain."""
-        center_x = self.config.width / 2
-        center_y = self.config.height / 2
+        center_x = self.config.sim_width / 2
+        center_y = self.config.sim_height / 2
         total_width = (self.S - 1) * self.L
         start_x = center_x - total_width / 2
 
         positions = []
         species = []
-        sigma = 20.0
+        sigma = 0.2  # meters
 
         for s in range(self.S):
             cx = start_x + s * self.L
@@ -288,16 +287,17 @@ class SnakeDelayLineDemo(ParticleLife):
         """Draw simulation."""
         self.screen.fill((255, 255, 255))
 
-        # Draw particles
+        # Draw particles (meters → pixels via ppu)
         for i in range(self.n):
             color = self.colors[self.species[i]]
             pos = self.positions[i]
-            x, y = int(pos[0] * self.zoom), int(pos[1] * self.zoom)
-            pygame.draw.circle(self.screen, color, (x, y), max(2, int(6 * self.zoom)))
+            x = int(pos[0] * self.ppu * self.zoom)
+            y = int(pos[1] * self.ppu * self.zoom)
+            pygame.draw.circle(self.screen, color, (x, y), max(2, int(0.06 * self.ppu * self.zoom)))
 
-        # Draw centroids and connecting line
+        # Draw centroids and connecting line (meters → pixels)
         centroids = self.get_species_centroids()
-        centroid_points = [(int(c[0] * self.zoom), int(c[1] * self.zoom)) for c in centroids]
+        centroid_points = [(int(c[0] * self.ppu * self.zoom), int(c[1] * self.ppu * self.zoom)) for c in centroids]
 
         if len(centroid_points) >= 2:
             pygame.draw.lines(self.screen, (0, 0, 0), False, centroid_points, 3)

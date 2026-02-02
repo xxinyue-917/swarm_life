@@ -18,18 +18,24 @@ from datetime import datetime
 @dataclass
 class Config:
     """Simulation configuration"""
+    # Display (pixels) — only for pygame window
     width: int = 1500
     height: int = 800
-    init_space_size: float = 100.0  # Size of the confined initialization area (width and height)
-    n_species: int = 2
-    n_particles: int = 90
-    dt: float = 0.1  # Timestep - increase for faster simulation (was 0.05)
-    max_speed: float = 300.0
-    a_rep: float = 10.0
-    a_att: float = 1.0
+    # Simulation space (meters)
+    sim_width: float = 10.0     # simulation width in meters
+    sim_height: float = 10.0    # simulation height in meters
+    # Physics params (all in meters / meters per second)
+    init_space_size: float = 1.0    # spawn area half-size in meters
+    n_species: int = 3
+    n_particles: int = 20              # particles per species
+    dt: float = 0.05
+    max_speed: float = 1.0         # meters/sec
+    r_max: float = 2.0             # interaction radius in meters
+    beta: float = 0.2              # repulsion threshold (dimensionless)
+    force_scale: float = 0.5       # force multiplier
     seed: int = 42
-    max_angular_speed: float = 20.0  # Max angular velocity (radians/sec)
-    a_rot: float = 5  # Strength of orientation alignment
+    max_angular_speed: float = 20.0
+    a_rot: float = 5.0
     # Matrices (initialized as None, will be set during initialization)
     position_matrix: Optional[List[List[float]]] = None
     orientation_matrix: Optional[List[List[float]]] = None
@@ -50,6 +56,11 @@ class Config:
         # Extract matrices if they exist
         pos_matrix = data.pop('position_matrix', None)
         ori_matrix = data.pop('orientation_matrix', None)
+
+        # Filter out unknown keys (e.g. old params from saved presets)
+        import dataclasses
+        valid_keys = {f.name for f in dataclasses.fields(cls)}
+        data = {k: v for k, v in data.items() if k in valid_keys}
 
         config = cls(**data)
         config.position_matrix = pos_matrix
@@ -87,7 +98,7 @@ class ParticleLife:
         self.rng = np.random.RandomState(config.seed)
 
         # Initialize particles
-        self.n = config.n_particles
+        self.n = config.n_particles * config.n_species
         self.n_species = config.n_species
 
         # Colors for species
@@ -129,6 +140,9 @@ class ParticleLife:
         self.zoom = 1.0  # Zoom factor for display scaling
         self.base_width = config.width  # Store base dimensions for scaling
         self.base_height = config.height
+        # Pixels per meter — converts simulation coords to screen coords
+        self.ppu = min(config.width / config.sim_width,
+                       config.height / config.sim_height)
         self.dragging_edge = None  # Track which edge is being dragged for resize
         self.drag_start_pos = None  # Mouse position when drag started
         self.drag_start_size = None  # Window size when drag started
@@ -173,9 +187,9 @@ class ParticleLife:
         if count is None:
             count = self.n
 
-        # Calculate spawn area (center of workspace)
-        center_x = self.config.width / 2
-        center_y = self.config.height / 2
+        # Calculate spawn area (center of simulation space, in meters)
+        center_x = self.config.sim_width / 2
+        center_y = self.config.sim_height / 2
 
         # Generate initial states
         positions = self.rng.uniform(
@@ -231,7 +245,7 @@ class ParticleLife:
             if mask.any():
                 centroids.append(self.positions[mask].mean(axis=0))
             else:
-                centroids.append(np.array([self.config.width / 2, self.config.height / 2]))
+                centroids.append(np.array([self.config.sim_width / 2, self.config.sim_height / 2]))
         return centroids
 
     def get_species_mask(self, species_id: int) -> np.ndarray:
@@ -267,7 +281,7 @@ class ParticleLife:
         """Save current configuration with timestamp"""
         # Update config with current values
         self.config.n_species = self.n_species
-        self.config.n_particles = self.n
+        self.config.n_particles = self.n // self.n_species
         self.config._position_matrix_np = self.matrix
         self.config._orientation_matrix_np = self.alignment_matrix
 
@@ -293,6 +307,7 @@ class ParticleLife:
             return
 
         self.n_species = new_count
+        self.n = self.config.n_particles * self.n_species
 
         # Regenerate colors
         self.colors = self.generate_colors(self.n_species)
@@ -309,25 +324,21 @@ class ParticleLife:
         self.initialize_particles()
 
         # Show distribution info
-        counts = [np.sum(self.species == s) for s in range(self.n_species)]
-        print(f"Reset simulation with {self.n_species} species (distribution: {counts})")
+        print(f"Reset: {self.n_species} species x {self.config.n_particles} = {self.n} particles")
 
     def change_particle_count(self, delta: int):
-        """Change the number of particles by delta"""
-        new_count = self.n + delta
-        new_count = max(50, min(2000, new_count))  # Clamp to 50-2000
+        """Change the number of particles per species by delta"""
+        new_per_species = self.config.n_particles + delta
+        new_per_species = max(5, min(200, new_per_species))  # Clamp per species
 
-        if new_count == self.n:
+        if new_per_species == self.config.n_particles:
             return
 
-        # For equal distribution, it's easier to regenerate all particles
-        # This ensures perfect balance across species
-        self.n = new_count
+        self.config.n_particles = new_per_species
+        self.n = new_per_species * self.n_species
         self.initialize_particles()
 
-        # Show distribution info
-        counts = [np.sum(self.species == s) for s in range(self.n_species)]
-        print(f"Particle count: {self.n} (distribution: {counts})")
+        print(f"Particles: {self.config.n_particles}/species x {self.n_species} = {self.n} total")
 
     def change_workspace_size(self, width_delta: int = 0, height_delta: int = 0):
         """Change the workspace size"""
@@ -353,9 +364,14 @@ class ParticleLife:
         self.zoom = 1.0
         self.fullscreen = False
 
-        # Keep particles within new bounds
-        self.positions[:, 0] = np.clip(self.positions[:, 0], 10, new_width - 10)
-        self.positions[:, 1] = np.clip(self.positions[:, 1], 10, new_height - 10)
+        # Recalculate pixels per unit
+        self.ppu = min(new_width / self.config.sim_width,
+                       new_height / self.config.sim_height)
+
+        # Keep particles within sim bounds (in meters)
+        margin = 0.05
+        self.positions[:, 0] = np.clip(self.positions[:, 0], margin, self.config.sim_width - margin)
+        self.positions[:, 1] = np.clip(self.positions[:, 1], margin, self.config.sim_height - margin)
 
         print(f"Workspace size: {new_width}x{new_height}")
 
@@ -370,20 +386,25 @@ class ParticleLife:
             screen_height = info.current_h
             self.screen = pygame.display.set_mode((screen_width, screen_height), pygame.FULLSCREEN)
 
+            # Recalculate ppu for fullscreen resolution
+            self.ppu = min(screen_width / self.config.sim_width,
+                           screen_height / self.config.sim_height)
+
             # Calculate zoom to fit the workspace in the screen
             zoom_x = screen_width / self.base_width
             zoom_y = screen_height / self.base_height
-            self.zoom = min(zoom_x, zoom_y)  # Use the smaller zoom to fit everything
+            self.zoom = min(zoom_x, zoom_y)
 
             print(f"Fullscreen ON: {screen_width}x{screen_height}, Zoom: {self.zoom:.2f}x")
         else:
             # Return to windowed mode with original size
             self.screen = pygame.display.set_mode((self.base_width, self.base_height))
+            self.ppu = min(self.base_width / self.config.sim_width,
+                           self.base_height / self.config.sim_height)
             self.zoom = 1.0
             print(f"Fullscreen OFF: {self.base_width}x{self.base_height}, Zoom: 1.0x")
 
-        # Note: We don't change config.width/height or particle positions
-        # The simulation space stays the same, only the display is scaled
+        # Simulation space stays the same, only display scaling changes
 
     def detect_edge(self, mouse_pos):
         """Detect which edge the mouse is near (for resizing)"""
@@ -426,9 +447,20 @@ class ParticleLife:
             pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_SIZENS)
 
     def compute_velocities(self) -> tuple:
-        """Compute velocities directly from neighbor interactions"""
+        """Compute velocities using piecewise-linear force kernel.
+
+        F(r,a) = { r/β - 1,                           r < β
+                 { a·(1 - |2r-1-β|/(1-β)),            β ≤ r < 1
+                 { 0,                                  r ≥ 1
+        where r is normalized distance (raw/r_max), a is k_pos matrix value.
+        """
         new_velocities = np.zeros_like(self.velocities)
         new_angular_velocities = np.zeros(self.n)
+
+        r_max = self.config.r_max
+        beta = self.config.beta
+        inv_1_minus_beta = 1.0 / (1.0 - beta) if beta < 1.0 else 1.0
+        force_scale = self.config.force_scale
 
         for i in range(self.n):
             # Vector from particle i to all others
@@ -438,60 +470,53 @@ class ParticleLife:
             dist = np.linalg.norm(delta, axis=1)
             dist[i] = np.inf  # Avoid self-interaction
 
-            # Find neighbors within cutoff
-            # neighbors = np.where(dist < self.config.r_cut)[0]
-
-
-            # if len(neighbors) == 0:
-            #     continue
-
             velocity_sum = np.zeros(2)
 
             for j in range(self.n):
                 if j == i:
                     continue  # Skip self-interaction
                 r = dist[j]
+                r_norm = r / r_max
+                if r_norm >= 1.0:
+                    continue  # No interaction beyond r_max
+
                 dx, dy = delta[j]
 
-                # species lookups
+                # Species lookups
                 si = self.species[i]; sj = self.species[j]
-                k_pos = self.matrix[si, sj]              # K^v
-                k_rot = self.alignment_matrix[si, sj]    # K^ω
+                k_pos = self.matrix[si, sj]
+                k_rot = self.alignment_matrix[si, sj]
 
-                # ---- unit directions ----
+                # Unit directions
                 inv_r = 1.0 / (r + 1e-8)
                 r_hat_x, r_hat_y = dx * inv_r, dy * inv_r
-                t_hat_x, t_hat_y = -dy * inv_r, dx * inv_r
+                t_hat_x, t_hat_y = -r_hat_y, r_hat_x
 
-                # ---- distance weights ----
-                # r0 = 10.0  # characteristic distance for decay
-                # att_weight = r0 / (r + r0)  # ~1 at close range, decays for far
-                # rep_weight = 1.0 / np.sqrt(r**2 + 1e-6)  # strong at close range
+                # ---- Piecewise linear radial force ----
+                if r_norm < beta:
+                    F = r_norm / beta - 1.0
+                else:
+                    F = k_pos * (1.0 - abs(2.0 * r_norm - 1.0 - beta) * inv_1_minus_beta)
 
-                weight = 1.0 / np.sqrt(r**2 + 1e-6)
-
-                # ---- radial part: attraction (far-decay) - repulsion (close-strong) ----
-                attraction = k_pos * self.config.a_att
-                repulsion  = self.config.a_rep * weight
-                radial_mag = attraction - repulsion
-                velocity_sum[0] += radial_mag * r_hat_x
-                velocity_sum[1] += radial_mag * r_hat_y
+                velocity_sum[0] += force_scale * F * r_hat_x
+                velocity_sum[1] += force_scale * F * r_hat_y
 
                 # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
                 omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
                                     -1.0, 1.0)
-                swirl_gain = -10 * k_rot * omega_norm * self.config.a_rot * weight
+                swirl_weight = 1.0 - r_norm
+                swirl_gain = k_rot * omega_norm * self.config.a_rot * swirl_weight
 
                 velocity_sum[0] += swirl_gain * t_hat_x
                 velocity_sum[1] += swirl_gain * t_hat_y
 
 
 
-            # Set new velocities
+            # Normalize by number of other particles
+            # velocity_sum /= (self.n - 1)
+
             new_velocities[i] = velocity_sum
-            # new_angular_velocities[i] = angular_vel_sum / len(neighbors)
-            # Currently just use simple natural frequency for angular velocity
-            new_angular_velocities[i] = 5  # Natural frequency
+            new_angular_velocities[i] = 1  # Natural frequency
 
         return new_velocities, new_angular_velocities
 
@@ -531,15 +556,16 @@ class ParticleLife:
         # Normalize orientations to [0, 2*pi]
         self.orientations = np.mod(self.orientations, 2 * np.pi)
 
-        # Boundary conditions (reflection)
+        # Boundary conditions (reflection) — in meters
+        margin = 0.05
         for i in range(2):
             # Left/top boundary
-            mask = self.positions[:, i] < 10
-            self.positions[mask, i] = 10
+            mask = self.positions[:, i] < margin
+            self.positions[mask, i] = margin
             self.velocities[mask, i] = abs(self.velocities[mask, i])
 
             # Right/bottom boundary
-            limit = self.config.width - 10 if i == 0 else self.config.height - 10
+            limit = self.config.sim_width - margin if i == 0 else self.config.sim_height - margin
             mask = self.positions[:, i] > limit
             self.positions[mask, i] = limit
             self.velocities[mask, i] = -abs(self.velocities[mask, i])
@@ -549,35 +575,34 @@ class ParticleLife:
         # Clear screen
         self.screen.fill((255, 255, 255))  # White background
 
-        # Draw particles with orientation (with zoom scaling)
+        # Draw particles with orientation (meters → pixels via ppu)
         for i in range(self.n):
             color = self.colors[self.species[i]]
             pos = self.positions[i]
 
-            # Apply zoom to position
-            x = int(pos[0] * self.zoom)
-            y = int(pos[1] * self.zoom)
+            # Convert meters to screen pixels
+            x = int(pos[0] * self.ppu * self.zoom)
+            y = int(pos[1] * self.ppu * self.zoom)
 
             if self.show_orientations:
-                # Draw as circle with orientation line (scaled with zoom)
+                # Draw as circle with orientation line
                 angle = self.orientations[i]
-                radius = 5 * self.zoom  # Circle radius scaled with zoom
+                radius = 0.05 * self.ppu * self.zoom  # 0.05m particle radius
 
                 # Draw circle
                 pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
 
                 # Draw orientation line inside the circle
-                # Line length is 80% of radius to keep it inside
                 line_length = radius * 0.8
                 end_x = x + line_length * np.cos(angle)
                 end_y = y + line_length * np.sin(angle)
 
-                # Draw black orientation line (thickness scales with zoom)
+                # Draw black orientation line
                 line_thickness = max(1, int(self.zoom))
                 pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y), line_thickness)
             else:
-                # Draw as simple circle (scaled)
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(4 * self.zoom)))
+                # Draw as simple circle
+                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
 
         # Draw info panel if enabled
         if self.show_info:
@@ -591,8 +616,8 @@ class ParticleLife:
         """Draw information panel"""
         info_lines = [
             f"FPS: {int(self.clock.get_fps())}",
-            f"Workspace: {self.config.width}x{self.config.height}",
-            f"Particles: {self.n} (50-2000)",
+            f"Workspace: {self.config.sim_width:.1f}x{self.config.sim_height:.1f}m ({self.config.width}x{self.config.height}px)",
+            f"Particles: {self.config.n_particles}/species x {self.n_species} = {self.n}",
             f"Species: {self.n_species} (2-10)",
             f"Active Matrix: {'POSITION' if self.current_matrix == 'position' else 'ORIENTATION'}",
             "",
