@@ -38,8 +38,8 @@ def generate_translation_matrix(n_species: int, strength: float) -> np.ndarray:
     K = np.zeros((n_species, n_species))
 
     for i in range(n_species - 1):
-        K[i, i + 1] = +strength  # 前一个对后一个：正
-        K[i + 1, i] = -strength  # 后一个对前一个：负
+        K[i, i + 1] = +strength
+        K[i + 1, i] = -strength
 
     return K
 

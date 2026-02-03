@@ -36,7 +36,7 @@ class Config:
     far_attraction: float = 0.1    # long-range attraction strength beyond r_max (0 = no long-range)
     seed: int = 42
     max_angular_speed: float = 20.0
-    a_rot: float = 5.0
+    a_rot: float = 1.0
     # Matrices (initialized as None, will be set during initialization)
     position_matrix: Optional[List[List[float]]] = None
     orientation_matrix: Optional[List[List[float]]] = None
@@ -530,7 +530,7 @@ class ParticleLife:
                 # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
                 omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
                                     -1.0, 1.0)
-                swirl_weight = 1.0 - r_norm
+                swirl_weight = np.clip(1.0 - r_norm, 0.0, 1.0)
                 swirl_gain = k_rot * omega_norm * self.config.a_rot * swirl_weight
 
                 velocity_sum[0] += swirl_gain * t_hat_x
