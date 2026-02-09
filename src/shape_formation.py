@@ -140,15 +140,17 @@ def generate_target_straight(n_joints):
 
 
 def generate_target_u_shape(n_joints, phi0):
-    """All joints bend the same way → U/arc shape."""
-    return np.full(n_joints, phi0)
+    """
+    U-shape: constant curvature, all joints bend the same direction.
+
+    Creates a circular arc opening upward (∪).
+    """
+    return np.full(n_joints, -phi0)  # Negative for upward-facing U
 
 
 def generate_target_m_shape(n_joints, phi0):
     """Symmetric two-peak: +phi0 at ends, -phi0 at center, using cosine profile."""
     target = np.zeros(n_joints)
-    if n_joints == 0:
-        return target
     for i in range(n_joints):
         # Map i to [0, 2*pi]: cos gives +1 at ends, -1 at center
         t = i / max(1, n_joints - 1) * 2 * np.pi
@@ -157,15 +159,24 @@ def generate_target_m_shape(n_joints, phi0):
 
 
 def generate_target_hug(n_joints, phi0):
-    """Left half +phi0, right half -phi0, tapered at center."""
+    """
+    Hug/encircle: opposite curvature on each half.
+
+    Left half bends one way, right half bends the other,
+    creating a shape that curves inward on both ends.
+    """
     target = np.zeros(n_joints)
     if n_joints == 0:
         return target
-    mid = n_joints / 2.0
+    mid = (n_joints - 1) / 2.0
     for i in range(n_joints):
-        # Linear taper: full strength at ends, zero at center
-        t = (i - mid) / mid  # -1 at start, +1 at end
-        target[i] = -phi0 * t
+        # +phi0 on left half, -phi0 on right half
+        if i < mid:
+            target[i] = phi0
+        elif i > mid:
+            target[i] = -phi0
+        else:
+            target[i] = 0  # center joint is straight
     return target
 
 
@@ -222,8 +233,8 @@ class MultiSpeciesDemo(ParticleLife):
         # ----- Control mode (shape tracking via PD on joint angles) -----
         self.control_mode = True        # False = manual blend, True = PD shape control
         self.pattern_index = 0          # 0=STRAIGHT, 1=U, 2=M, 3=HUG
-        self.phi0 = 0.4                 # Target curvature magnitude (radians)
-        self.kp = 0.8                   # Proportional gain
+        self.phi0 = 0.8                 # Target curvature magnitude (radians, ~46° per joint)
+        self.kp = 1.2                   # Proportional gain
         self.kd = 0.8                   # Derivative gain (strong damping to prevent orbiting)
         self.u_max = 0.3                # Control output clamp (small to avoid orbit feedback)
         self.e_max = np.pi / 6          # Max error magnitude (~30°, gentle corrections only)
