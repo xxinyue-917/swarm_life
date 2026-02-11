@@ -4,10 +4,11 @@ Snake Demo — Direct Head Steering
 
 A chain of particle clusters (species) connected by position-matrix attraction.
 Arrow keys steer the head left/right by manipulating the K_rot matrix.
-The snake stays in place and undulates.
+Up/Down arrows control forward movement speed.
 
 Controls:
     ←/→:   Steer head left/right
+    ↑/↓:   Increase/decrease forward speed
     R:     Reset positions
     SPACE: Pause/Resume
     O:     Toggle orientation display
@@ -33,21 +34,28 @@ from particle_life import Config, ParticleLife
 
 def generate_position_matrix(n_species: int,
                              self_cohesion: float = 0.8,
-                             adjacent_attraction: float = 0.3) -> np.ndarray:
+                             adjacent_attraction: float = 0.3,
+                             forward_bias: float = 0.1) -> np.ndarray:
     """
     Generate K_pos matrix for chain structure.
 
     Diagonal = self-cohesion, off-diagonal only for adjacent species.
+
+    Args:
+        forward_bias: Asymmetry that creates forward motion.
+                      Positive = move toward head (species 0)
+                      Zero = stationary
+                      Negative = move toward tail
     """
     K = np.zeros((n_species, n_species))
     for i in range(n_species):
         K[i, i] = self_cohesion
         if i > 0:
+            # Attraction to species behind (toward tail)
             K[i, i - 1] = adjacent_attraction
         if i < n_species - 1:
-            K[i, i + 1] = adjacent_attraction - 0.1
-        # make the group moving forward
-        # K[0, 1] = adjacent_attraction - 0.3 # slight forward pull for segment 1
+            # Attraction to species ahead (toward head) - reduced by forward_bias
+            K[i, i + 1] = adjacent_attraction - forward_bias
     return K
 
 
@@ -91,6 +99,7 @@ class SnakeDemo(ParticleLife):
         # Control state
         self.turn_input = 0.0       # -1 (full left) to +1 (full right)
         self.base_k_rot = 1.0       # Base rotation matrix strength
+        self.forward_speed = 0.1    # Forward bias (0 = stationary, positive = move forward)
 
         # Input smoothing
         self.turn_decay = 0.92      # How quickly turn input returns to 0
@@ -128,6 +137,7 @@ class SnakeDemo(ParticleLife):
         print("")
         print("Controls:")
         print("  ←/→     Steer left/right")
+        print("  ↑/↓     Forward speed (+/-)")
         print("  R       Reset positions")
         print("  SPACE   Pause")
         print("  O       Toggle orientation display")
@@ -200,6 +210,23 @@ class SnakeDemo(ParticleLife):
         for i in range(self.n_species):
             for j in range(self.n_species):
                 self.alignment_matrix[i, j] = np.clip(K_rot[i, j], -1.0, 1.0)
+
+    def update_forward_speed(self, delta: float):
+        """
+        Adjust forward speed and update position matrix.
+
+        Args:
+            delta: Change in forward speed (positive = faster forward)
+        """
+        self.forward_speed = np.clip(self.forward_speed + delta, -0.3, 0.5)
+
+        # Regenerate position matrix with new forward bias
+        new_matrix = generate_position_matrix(
+            self.n_species,
+            forward_bias=self.forward_speed
+        )
+        self.matrix[:] = new_matrix
+        print(f"Forward speed: {self.forward_speed:.2f}")
 
     def step(self):
         """Perform one simulation step with control updates."""
@@ -302,9 +329,11 @@ class SnakeDemo(ParticleLife):
             f"Particles: {self.n}",
             "",
             f"Turn Input: {self.turn_input:+.2f}",
+            f"Forward Speed: {self.forward_speed:+.2f}",
             "",
             "Controls:",
             "←/→: Steer left/right",
+            "↑/↓: Forward speed",
             "R: Reset  SPACE: Pause",
             "O: Orientations  H: GUI",
             "I: Toggle info  Q: Quit",
@@ -455,6 +484,12 @@ class SnakeDemo(ParticleLife):
 
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui
+
+                # Forward speed controls
+                elif event.key == pygame.K_UP:
+                    self.update_forward_speed(0.05)
+                elif event.key == pygame.K_DOWN:
+                    self.update_forward_speed(-0.05)
 
                 # Matrix editing controls
                 elif event.key == pygame.K_m:
