@@ -257,8 +257,8 @@ class SnakeDemo(ParticleLife):
 
             if self.show_orientations:
                 angle = self.orientations[i]
-                radius = 0.05 * self.ppu * self.zoom
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
+                radius = 0.08 * self.ppu * self.zoom
+                pygame.draw.circle(self.screen, color, (x, y), max(3, int(radius)))
                 line_length = radius * 0.8
                 end_x = x + line_length * np.cos(angle)
                 end_y = y + line_length * np.sin(angle)
@@ -266,7 +266,7 @@ class SnakeDemo(ParticleLife):
                                  max(1, int(self.zoom)))
             else:
                 pygame.draw.circle(self.screen, color, (x, y),
-                                   max(1, int(0.04 * self.ppu * self.zoom)))
+                                   max(3, int(0.08 * self.ppu * self.zoom)))
 
         if self.hide_gui:
             return
