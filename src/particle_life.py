@@ -35,7 +35,6 @@ class Config:
     force_scale: float = 0.5       # force multiplier
     far_attraction: float = 0.1    # long-range attraction strength beyond r_max (0 = no long-range)
     seed: int = 42
-    max_angular_speed: float = 20.0
     a_rot: float = 1.0
     # Matrices (initialized as None, will be set during initialization)
     position_matrix: Optional[List[List[float]]] = None
@@ -183,7 +182,7 @@ class ParticleLife:
             reset_all: If True, reset all particles. If False, return new arrays for appending.
 
         Returns:
-            If reset_all=False, returns tuple of (positions, velocities, orientations, angular_velocities, species)
+            If reset_all=False, returns tuple of (positions, velocities, orientations, species)
         """
         if count is None:
             count = self.n
@@ -200,7 +199,6 @@ class ParticleLife:
         )
         velocities = np.zeros((count, 2))  # Start with zero velocity
         orientations = self.rng.uniform(0, 2 * np.pi, count)
-        angular_velocities = self.rng.randn(count) * 0.1
 
         # Equal distribution of species
         species = np.zeros(count, dtype=int)
@@ -224,11 +222,10 @@ class ParticleLife:
             self.positions = positions
             self.velocities = velocities
             self.orientations = orientations
-            self.angular_velocities = angular_velocities
             self.species = species
         else:
             # Partial: return new arrays for appending
-            return positions, velocities, orientations, angular_velocities, species
+            return positions, velocities, orientations, species
 
     # =========================================================================
     # Utility Methods (for use in experiments)
@@ -461,7 +458,6 @@ class ParticleLife:
         All boundaries are continuous. Set far_attraction=0 to disable zones 3-4 floor.
         """
         new_velocities = np.zeros_like(self.velocities)
-        new_angular_velocities = np.zeros(self.n)
 
         r_max = self.config.r_max
         beta = self.config.beta
@@ -528,10 +524,8 @@ class ParticleLife:
                 velocity_sum[1] += force_scale * F * r_hat_y
 
                 # ---- tangential swirl: Δẋ_i += μ_swirl * k_rot * (ω_j/ω_max) * g_t(r) * t̂ ----
-                omega_norm = np.clip(self.angular_velocities[j] / self.config.max_angular_speed,
-                                    -1.0, 1.0)
                 swirl_weight = np.clip(1.0 - r_norm, 0.0, 1.0)
-                swirl_gain = k_rot * omega_norm * self.config.a_rot * swirl_weight
+                swirl_gain = k_rot * self.config.a_rot * swirl_weight
 
                 velocity_sum[0] += swirl_gain * t_hat_x
                 velocity_sum[1] += swirl_gain * t_hat_y
@@ -542,9 +536,8 @@ class ParticleLife:
             # velocity_sum /= (self.n - 1)
 
             new_velocities[i] = velocity_sum
-            new_angular_velocities[i] = 1  # Natural frequency
 
-        return new_velocities, new_angular_velocities
+        return new_velocities
 
     def step(self):
         """Perform one simulation step"""
@@ -552,13 +545,7 @@ class ParticleLife:
             return
 
         # Compute new velocities directly
-        new_velocities, new_angular_velocities = self.compute_velocities()
-
-        # Blend with current velocities for smoothness
-        self.velocities = new_velocities
-
-        # Blend angular velocities for smoother rotation
-        self.angular_velocities = new_angular_velocities
+        self.velocities = self.compute_velocities()
 
         # Clamp linear speed
         speed = np.linalg.norm(self.velocities, axis=1, keepdims=True)
@@ -568,16 +555,9 @@ class ParticleLife:
             self.velocities
         )
 
-        # Clamp angular speed
-        self.angular_velocities = np.clip(
-            self.angular_velocities,
-            -self.config.max_angular_speed,
-            self.config.max_angular_speed
-        )
-
         # Update positions and orientations
         self.positions += self.velocities * self.config.dt
-        self.orientations += self.angular_velocities * self.config.dt
+        self.orientations += self.config.dt
 
         # Normalize orientations to [0, 2*pi]
         self.orientations = np.mod(self.orientations, 2 * np.pi)
