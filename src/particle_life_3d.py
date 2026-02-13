@@ -7,6 +7,7 @@ depth cues, and camera controls.
 """
 
 import pygame
+import pygame.gfxdraw
 import numpy as np
 from dataclasses import dataclass, field, asdict
 from typing import List, Tuple, Optional
@@ -16,7 +17,6 @@ import json
 import argparse
 import os
 from datetime import datetime
-from scipy.spatial.transform import Rotation
 
 
 @dataclass
@@ -40,26 +40,33 @@ class Config3D:
     force_scale: float = 0.5        # force multiplier
     far_attraction: float = 0.1     # long-range attraction strength beyond r_max
     seed: int = 42
-    max_angular_speed: float = 20.0
     a_rot: float = 1.0
     # Matrices (initialized as None, will be set during initialization)
     position_matrix: Optional[List[List[float]]] = None
-    orientation_matrix: Optional[List[List[float]]] = None
+    orientation_matrix_x: Optional[List[List[float]]] = None
+    orientation_matrix_y: Optional[List[List[float]]] = None
+    orientation_matrix_z: Optional[List[List[float]]] = None
 
     def to_dict(self):
         """Convert config to dictionary for JSON serialization"""
         d = asdict(self)
         if hasattr(self, '_position_matrix_np'):
             d['position_matrix'] = self._position_matrix_np.tolist()
-        if hasattr(self, '_orientation_matrix_np'):
-            d['orientation_matrix'] = self._orientation_matrix_np.tolist()
+        for axis in ('x', 'y', 'z'):
+            attr = f'_orientation_matrix_{axis}_np'
+            if hasattr(self, attr):
+                d[f'orientation_matrix_{axis}'] = getattr(self, attr).tolist()
         return d
 
     @classmethod
     def from_dict(cls, data):
         """Create Config3D from dictionary"""
         pos_matrix = data.pop('position_matrix', None)
-        ori_matrix = data.pop('orientation_matrix', None)
+        ori_x = data.pop('orientation_matrix_x', None)
+        ori_y = data.pop('orientation_matrix_y', None)
+        ori_z = data.pop('orientation_matrix_z', None)
+        # Legacy: single orientation_matrix maps to Y-axis rotation
+        legacy_ori = data.pop('orientation_matrix', None)
 
         import dataclasses
         valid_keys = {f.name for f in dataclasses.fields(cls)}
@@ -67,7 +74,9 @@ class Config3D:
 
         config = cls(**data)
         config.position_matrix = pos_matrix
-        config.orientation_matrix = ori_matrix
+        config.orientation_matrix_x = ori_x
+        config.orientation_matrix_y = ori_y if ori_y is not None else legacy_ori
+        config.orientation_matrix_z = ori_z
         return config
 
     def save(self, filepath):
@@ -91,11 +100,10 @@ class ParticleLife3D:
 
     Features:
     - 3D positions and velocities
-    - Quaternion-based orientations
+    - Three rotation matrices (X, Y, Z axes) for full 3D orbital control
     - Camera rotation (yaw/pitch) with mouse drag
     - Zoom control with scroll wheel
-    - Depth cues (size and alpha)
-    - Dual interaction matrices (position and orientation)
+    - Depth-sorted rendering with anti-aliased particles
     """
 
     def __init__(self, config: Config3D, headless: bool = False):
@@ -116,14 +124,17 @@ class ParticleLife3D:
         else:
             self.matrix = np.zeros((self.n_species, self.n_species))
 
-        if config.orientation_matrix is not None:
-            self.alignment_matrix = np.array(config.orientation_matrix)
-        else:
-            self.alignment_matrix = np.zeros((self.n_species, self.n_species))
+        # Three rotation matrices (one per axis)
+        shape = (self.n_species, self.n_species)
+        self.alignment_matrix_x = np.array(config.orientation_matrix_x) if config.orientation_matrix_x is not None else np.zeros(shape)
+        self.alignment_matrix_y = np.array(config.orientation_matrix_y) if config.orientation_matrix_y is not None else np.zeros(shape)
+        self.alignment_matrix_z = np.array(config.orientation_matrix_z) if config.orientation_matrix_z is not None else np.zeros(shape)
 
         # Store matrices in config for saving
         self.config._position_matrix_np = self.matrix
-        self.config._orientation_matrix_np = self.alignment_matrix
+        self.config._orientation_matrix_x_np = self.alignment_matrix_x
+        self.config._orientation_matrix_y_np = self.alignment_matrix_y
+        self.config._orientation_matrix_z_np = self.alignment_matrix_z
 
         # Initialize all particle states
         self.initialize_particles()
@@ -209,13 +220,6 @@ class ParticleLife3D:
         )
         velocities = np.zeros((count, 3))  # Start with zero velocity
 
-        # Quaternion orientations - random initial orientations
-        # Store as (N, 4) array: [w, x, y, z]
-        orientations = self.random_quaternions(count)
-
-        # 3D angular velocities
-        angular_velocities = self.rng.randn(count, 3) * 0.1
-
         # Equal distribution of species
         species = np.zeros(count, dtype=int)
         particles_per_species = count // self.n_species
@@ -233,55 +237,9 @@ class ParticleLife3D:
             self.n = count
             self.positions = positions
             self.velocities = velocities
-            self.orientations = orientations
-            self.angular_velocities = angular_velocities
             self.species = species
         else:
-            return positions, velocities, orientations, angular_velocities, species
-
-    def random_quaternions(self, n: int) -> np.ndarray:
-        """Generate n random unit quaternions."""
-        # Use scipy for proper random rotations
-        rotations = Rotation.random(n, random_state=self.rng)
-        return rotations.as_quat()  # Returns [x, y, z, w] format
-
-    def quaternion_rotate_vector(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
-        """
-        Rotate vector v by quaternion q.
-        q: quaternion [x, y, z, w]
-        v: vector [x, y, z]
-        """
-        rotation = Rotation.from_quat(q)
-        return rotation.apply(v)
-
-    def get_tangent_direction(self, i: int, r_hat: np.ndarray) -> np.ndarray:
-        """
-        Get consistent tangent direction for particle i perpendicular to r_hat.
-        Uses the particle's orientation to define a reference direction,
-        then computes the tangent in the plane perpendicular to r_hat.
-        """
-        # Get particle's "up" direction from its orientation
-        q = self.orientations[i]
-        up = self.quaternion_rotate_vector(q, np.array([0.0, 1.0, 0.0]))
-
-        # Compute tangent: t = r_hat × up, then normalize
-        t = np.cross(r_hat, up)
-        t_norm = np.linalg.norm(t)
-
-        if t_norm < 1e-8:
-            # r_hat is parallel to up, use forward direction instead
-            forward = self.quaternion_rotate_vector(q, np.array([0.0, 0.0, 1.0]))
-            t = np.cross(r_hat, forward)
-            t_norm = np.linalg.norm(t)
-            if t_norm < 1e-8:
-                # Fallback: arbitrary perpendicular
-                if abs(r_hat[0]) < 0.9:
-                    t = np.cross(r_hat, np.array([1.0, 0.0, 0.0]))
-                else:
-                    t = np.cross(r_hat, np.array([0.0, 1.0, 0.0]))
-                t_norm = np.linalg.norm(t)
-
-        return t / t_norm
+            return positions, velocities, species
 
     # =========================================================================
     # 3D Projection and Camera
@@ -358,18 +316,27 @@ class ParticleLife3D:
     # Physics
     # =========================================================================
 
-    def compute_velocities(self) -> Tuple[np.ndarray, np.ndarray]:
+    def compute_velocities(self) -> np.ndarray:
         """
         Compute 3D velocities using the same force kernel as 2D.
+        Three rotation matrices provide tangential forces around X, Y, Z axes.
         """
         new_velocities = np.zeros_like(self.velocities)
-        new_angular_velocities = np.zeros_like(self.angular_velocities)
 
         r_max = self.config.r_max
         beta = self.config.beta
         inv_1_minus_beta = 1.0 / (1.0 - beta) if beta < 1.0 else 1.0
         force_scale = self.config.force_scale
         far_attraction = self.config.far_attraction
+        a_rot = self.config.a_rot
+
+        # Pre-compute axis unit vectors
+        axes = [np.array([1.0, 0.0, 0.0]),
+                np.array([0.0, 1.0, 0.0]),
+                np.array([0.0, 0.0, 1.0])]
+        rot_matrices = [self.alignment_matrix_x,
+                        self.alignment_matrix_y,
+                        self.alignment_matrix_z]
 
         for i in range(self.n):
             # Vector from particle i to all others
@@ -403,14 +370,10 @@ class ParticleLife3D:
                 si = self.species[i]
                 sj = self.species[j]
                 k_pos = self.matrix[si, sj]
-                k_rot = self.alignment_matrix[si, sj]
 
                 # Unit radial direction
                 inv_r = 1.0 / (r + 1e-8)
                 r_hat = delta[j] * inv_r
-
-                # 3D tangent direction (using particle orientation)
-                t_hat = self.get_tangent_direction(i, r_hat)
 
                 # Piecewise linear radial force (4 zones)
                 if r_norm < beta:
@@ -428,20 +391,19 @@ class ParticleLife3D:
 
                 velocity_sum += force_scale * F * r_hat
 
-                # Tangential swirl force
-                omega_norm = np.clip(
-                    np.linalg.norm(self.angular_velocities[j]) / self.config.max_angular_speed,
-                    -1.0, 1.0
-                )
+                # Tangential swirl forces (one per axis)
                 swirl_weight = np.clip(1.0 - r_norm, 0.0, 1.0)
-                swirl_gain = k_rot * omega_norm * self.config.a_rot * swirl_weight
-
-                velocity_sum += swirl_gain * t_hat
+                for rot_mat, axis in zip(rot_matrices, axes):
+                    k_rot = rot_mat[si, sj]
+                    if abs(k_rot) > 1e-8:
+                        t = np.cross(r_hat, axis)
+                        t_norm = np.linalg.norm(t)
+                        if t_norm > 1e-8:
+                            velocity_sum += (k_rot * a_rot * swirl_weight / t_norm) * t
 
             new_velocities[i] = velocity_sum
-            new_angular_velocities[i] = np.ones(3)  # Natural frequency
 
-        return new_velocities, new_angular_velocities
+        return new_velocities
 
     def step(self):
         """Perform one simulation step"""
@@ -449,43 +411,19 @@ class ParticleLife3D:
             return
 
         # Compute new velocities
-        new_velocities, new_angular_velocities = self.compute_velocities()
-
-        self.velocities = new_velocities
-        self.angular_velocities = new_angular_velocities
+        self.velocities = self.compute_velocities()
 
         # Clamp linear speed
         speed = np.linalg.norm(self.velocities, axis=1, keepdims=True)
-        speed_safe = np.maximum(speed, 1e-8)  # Avoid division by zero
+        speed_safe = np.maximum(speed, 1e-8)
         self.velocities = np.where(
             speed > self.config.max_speed,
             self.velocities * self.config.max_speed / speed_safe,
             self.velocities
         )
 
-        # Clamp angular speed
-        ang_speed = np.linalg.norm(self.angular_velocities, axis=1, keepdims=True)
-        ang_speed_safe = np.maximum(ang_speed, 1e-8)  # Avoid division by zero
-        self.angular_velocities = np.where(
-            ang_speed > self.config.max_angular_speed,
-            self.angular_velocities * self.config.max_angular_speed / ang_speed_safe,
-            self.angular_velocities
-        )
-
         # Update positions
         self.positions += self.velocities * self.config.dt
-
-        # Update orientations using angular velocities
-        for i in range(self.n):
-            omega = self.angular_velocities[i]
-            omega_mag = np.linalg.norm(omega)
-            if omega_mag > 1e-8:
-                axis = omega / omega_mag
-                angle = omega_mag * self.config.dt
-                delta_rot = Rotation.from_rotvec(axis * angle)
-                current_rot = Rotation.from_quat(self.orientations[i])
-                new_rot = delta_rot * current_rot
-                self.orientations[i] = new_rot.as_quat()
 
         # 3D Boundary conditions (reflection on 6 faces)
         margin = 0.05
@@ -525,14 +463,18 @@ class ParticleLife3D:
         # Sort by depth (draw far particles first)
         indices = np.argsort(-depth)
 
-        # Fixed particle size
-        size = max(4, int(4 * self.cam_zoom))
+        # Particle radius matching 2D style
+        r = max(3, int(0.04 * self.ppu * self.cam_zoom))
 
-        # Draw particles
+        # Draw anti-aliased particles
         for i in indices:
             color = self.colors[self.species[i]]
-            x, y = screen_x[i], screen_y[i]
-            pygame.draw.circle(self.screen, color, (int(x), int(y)), size)
+            sx, sy = int(screen_x[i]), int(screen_y[i])
+            try:
+                pygame.gfxdraw.aacircle(self.screen, sx, sy, r, color)
+                pygame.gfxdraw.filled_circle(self.screen, sx, sy, r, color)
+            except OverflowError:
+                pass
 
         # Draw info panel
         if self.show_info:
@@ -576,14 +518,20 @@ class ParticleLife3D:
         # X axis (red)
         ax, ay, _ = self.project_3d_to_2d(np.array([axis_len, 0, 0]))
         pygame.draw.line(self.screen, (200, 50, 50), (int(ox), int(oy)), (int(ax), int(ay)), 2)
+        if self.font:
+            self.screen.blit(self.font.render("X", True, (200, 50, 50)), (int(ax) + 5, int(ay) - 5))
 
         # Y axis (green)
         ax, ay, _ = self.project_3d_to_2d(np.array([0, axis_len, 0]))
         pygame.draw.line(self.screen, (50, 200, 50), (int(ox), int(oy)), (int(ax), int(ay)), 2)
+        if self.font:
+            self.screen.blit(self.font.render("Y", True, (50, 200, 50)), (int(ax) + 5, int(ay) - 5))
 
         # Z axis (blue)
         ax, ay, _ = self.project_3d_to_2d(np.array([0, 0, axis_len]))
         pygame.draw.line(self.screen, (50, 50, 200), (int(ox), int(oy)), (int(ax), int(ay)), 2)
+        if self.font:
+            self.screen.blit(self.font.render("Z", True, (50, 50, 200)), (int(ax) + 5, int(ay) - 5))
 
     def draw_info(self):
         """Draw information panel"""
@@ -594,7 +542,7 @@ class ParticleLife3D:
             f"Species: {self.n_species}",
             f"Camera: yaw={np.degrees(self.cam_yaw):.0f}° pitch={np.degrees(self.cam_pitch):.0f}°",
             f"Zoom: {self.cam_zoom:.2f}x",
-            f"Matrix: {'POSITION' if self.current_matrix == 'position' else 'ORIENTATION'}",
+            f"Matrix: {self.current_matrix.upper()}",
             "",
             "Controls:",
             "Left drag - Rotate camera",
@@ -627,14 +575,13 @@ class ParticleLife3D:
         matrix_y = 100
         cell_size = 36
 
-        if self.current_matrix == "position":
-            matrix = self.matrix
-            matrix_name = "POSITION MATRIX (K_pos)"
-            title_color = (100, 255, 100)
-        else:
-            matrix = self.alignment_matrix
-            matrix_name = "ORIENTATION MATRIX (K_rot)"
-            title_color = (100, 150, 255)
+        matrix_info = {
+            "position": (self.matrix, "POSITION MATRIX (K_pos)", (100, 255, 100)),
+            "rot_x":    (self.alignment_matrix_x, "ROTATION X (K_rot_x)", (255, 100, 100)),
+            "rot_y":    (self.alignment_matrix_y, "ROTATION Y (K_rot_y)", (100, 255, 100)),
+            "rot_z":    (self.alignment_matrix_z, "ROTATION Z (K_rot_z)", (100, 100, 255)),
+        }
+        matrix, matrix_name, title_color = matrix_info[self.current_matrix]
 
         title = self.font.render(matrix_name, True, title_color)
         self.screen.blit(title, (matrix_x, matrix_y - 40))
@@ -756,7 +703,9 @@ class ParticleLife3D:
 
                 elif event.key == pygame.K_TAB:
                     if self.show_matrix:
-                        self.current_matrix = "orientation" if self.current_matrix == "position" else "position"
+                        cycle = ["position", "rot_x", "rot_y", "rot_z"]
+                        idx = cycle.index(self.current_matrix)
+                        self.current_matrix = cycle[(idx + 1) % len(cycle)]
                         print(f"Editing: {self.current_matrix} matrix")
 
                 elif event.key == pygame.K_UP and not self.show_matrix:
@@ -782,20 +731,12 @@ class ParticleLife3D:
                         self.matrix_cursor[1] = min(self.n_species - 1, self.matrix_cursor[1] + 1)
                     elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                         i, j = self.matrix_cursor
-                        if self.current_matrix == "position":
-                            self.matrix[i, j] = min(1.0, self.matrix[i, j] + 0.1)
-                            self.config._position_matrix_np = self.matrix
-                        else:
-                            self.alignment_matrix[i, j] = min(1.0, self.alignment_matrix[i, j] + 0.1)
-                            self.config._orientation_matrix_np = self.alignment_matrix
+                        mat = self._get_current_edit_matrix()
+                        mat[i, j] = min(1.0, mat[i, j] + 0.1)
                     elif event.key == pygame.K_MINUS:
                         i, j = self.matrix_cursor
-                        if self.current_matrix == "position":
-                            self.matrix[i, j] = max(-1.0, self.matrix[i, j] - 0.1)
-                            self.config._position_matrix_np = self.matrix
-                        else:
-                            self.alignment_matrix[i, j] = max(-1.0, self.alignment_matrix[i, j] - 0.1)
-                            self.config._orientation_matrix_np = self.alignment_matrix
+                        mat = self._get_current_edit_matrix()
+                        mat[i, j] = max(-1.0, mat[i, j] - 0.1)
 
                 elif event.key == pygame.K_s:
                     filename = self.save_current_config()
@@ -814,6 +755,15 @@ class ParticleLife3D:
     # Utility Methods
     # =========================================================================
 
+    def _get_current_edit_matrix(self) -> np.ndarray:
+        """Return the numpy array for the currently selected matrix."""
+        return {
+            "position": self.matrix,
+            "rot_x": self.alignment_matrix_x,
+            "rot_y": self.alignment_matrix_y,
+            "rot_z": self.alignment_matrix_z,
+        }[self.current_matrix]
+
     def change_species_count(self, delta: int):
         """Change the number of species"""
         new_count = self.n_species + delta
@@ -825,10 +775,15 @@ class ParticleLife3D:
         self.n_species = new_count
         self.n = self.config.n_particles * self.n_species
         self.colors = self.generate_colors(self.n_species)
-        self.matrix = np.zeros((self.n_species, self.n_species))
-        self.alignment_matrix = np.zeros((self.n_species, self.n_species))
+        shape = (self.n_species, self.n_species)
+        self.matrix = np.zeros(shape)
+        self.alignment_matrix_x = np.zeros(shape)
+        self.alignment_matrix_y = np.zeros(shape)
+        self.alignment_matrix_z = np.zeros(shape)
         self.config._position_matrix_np = self.matrix
-        self.config._orientation_matrix_np = self.alignment_matrix
+        self.config._orientation_matrix_x_np = self.alignment_matrix_x
+        self.config._orientation_matrix_y_np = self.alignment_matrix_y
+        self.config._orientation_matrix_z_np = self.alignment_matrix_z
         self.initialize_particles()
         print(f"Species: {self.n_species}, Total: {self.n}")
 
@@ -850,7 +805,9 @@ class ParticleLife3D:
         self.config.n_species = self.n_species
         self.config.n_particles = self.n // self.n_species
         self.config._position_matrix_np = self.matrix
-        self.config._orientation_matrix_np = self.alignment_matrix
+        self.config._orientation_matrix_x_np = self.alignment_matrix_x
+        self.config._orientation_matrix_y_np = self.alignment_matrix_y
+        self.config._orientation_matrix_z_np = self.alignment_matrix_z
 
         os.makedirs("presets3d", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
