@@ -5,6 +5,7 @@ Interactive particle simulation with real-time parameter adjustment
 """
 
 import pygame
+import pygame.gfxdraw
 import numpy as np
 from dataclasses import dataclass, field, asdict
 from typing import List, Tuple, Optional
@@ -555,12 +556,8 @@ class ParticleLife:
             self.velocities
         )
 
-        # Update positions and orientations
+        # Update positions
         self.positions += self.velocities * self.config.dt
-        self.orientations += self.config.dt
-
-        # Normalize orientations to [0, 2*pi]
-        self.orientations = np.mod(self.orientations, 2 * np.pi)
 
         # Boundary conditions (reflection) — in meters
         margin = 0.05
@@ -590,25 +587,9 @@ class ParticleLife:
             x = int(pos[0] * self.ppu * self.zoom)
             y = int(pos[1] * self.ppu * self.zoom)
 
-            if self.show_orientations:
-                # Draw as circle with orientation line
-                angle = self.orientations[i]
-                radius = 0.05 * self.ppu * self.zoom  # 0.05m particle radius
-
-                # Draw circle
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
-
-                # Draw orientation line inside the circle
-                line_length = radius * 0.8
-                end_x = x + line_length * np.cos(angle)
-                end_y = y + line_length * np.sin(angle)
-
-                # Draw black orientation line
-                line_thickness = max(1, int(self.zoom))
-                pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y), line_thickness)
-            else:
-                # Draw as simple circle
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
+            r = max(3, int(0.04 * self.ppu * self.zoom))
+            pygame.gfxdraw.aacircle(self.screen, x, y, r, color)
+            pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
 
         # Draw info panel if enabled
         if self.show_info:
