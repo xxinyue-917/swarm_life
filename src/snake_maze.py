@@ -448,30 +448,14 @@ class SnakeMazeDemo(SnakeDemo):
             self.draw_goal()
 
         # Draw particles
-        for i in range(self.n):
-            color = self.colors[self.species[i]]
-            pos = self.positions[i]
-            x = int(pos[0] * self.ppu * self.zoom)
-            y = int(pos[1] * self.ppu * self.zoom)
-            pygame.draw.circle(self.screen, color, (x, y),
-                               max(1, int(0.04 * self.ppu * self.zoom)))
+        self.draw_particles()
 
         if self.hide_gui:
             return
 
-        # Draw centroid spine
-        centroids = self.get_species_centroids()
-        pts = [(int(c[0] * self.ppu * self.zoom),
-                int(c[1] * self.ppu * self.zoom)) for c in centroids]
-
-        if len(pts) >= 2:
-            pygame.draw.lines(self.screen, (0, 0, 0), False, pts, 2)
-
-        # Draw centroid markers
-        for i, (cx, cy) in enumerate(pts):
-            r = 8 if i == 0 else 5
-            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), r + 1)
-            pygame.draw.circle(self.screen, self.colors[i], (cx, cy), r)
+        # Draw centroid spine and markers
+        pts = self.draw_centroid_spine(line_width=2)
+        self.draw_centroid_markers(pts, head_r=8, tail_r=5)
 
         # Control indicator
         self.draw_control_indicator()
@@ -573,10 +557,7 @@ class SnakeMazeDemo(SnakeDemo):
                 self.screen.blit(text, (10, y))
             y += 22
 
-        if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
-            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
-            self.screen.blit(pause_text, rect)
+        self.draw_pause_indicator()
 
     def handle_events(self) -> bool:
         """Handle pygame events."""

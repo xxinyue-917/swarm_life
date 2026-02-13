@@ -248,48 +248,16 @@ class SnakeDemo(ParticleLife):
         """Draw the simulation with control overlay."""
         self.screen.fill((255, 255, 255))
 
-        # Draw particles (meters → pixels via ppu)
-        for i in range(self.n):
-            color = self.colors[self.species[i]]
-            pos = self.positions[i]
-            x = int(pos[0] * self.ppu * self.zoom)
-            y = int(pos[1] * self.ppu * self.zoom)
-
-            if self.show_orientations:
-                angle = self.orientations[i]
-                radius = 0.08 * self.ppu * self.zoom
-                pygame.draw.circle(self.screen, color, (x, y), max(3, int(radius)))
-                line_length = radius * 0.8
-                end_x = x + line_length * np.cos(angle)
-                end_y = y + line_length * np.sin(angle)
-                pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y),
-                                 max(1, int(self.zoom)))
-            else:
-                pygame.draw.circle(self.screen, color, (x, y),
-                                   max(3, int(0.08 * self.ppu * self.zoom)))
+        # Draw particles
+        self.draw_particles()
 
         if self.hide_gui:
             return
 
-        # Draw centroid spine
-        centroids = self.get_species_centroids()
-        pts = [(int(c[0] * self.ppu * self.zoom),
-                int(c[1] * self.ppu * self.zoom)) for c in centroids]
-
-        if len(pts) >= 2:
-            pygame.draw.lines(self.screen, (0, 0, 0), False, pts, 3)
-
-        # Draw centroid markers (head is larger)
-        for i, (cx, cy) in enumerate(pts):
-            r = 10 if i == 0 else 6
-            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), r + 2)
-            pygame.draw.circle(self.screen, self.colors[i], (cx, cy), r)
-
-        # Draw swarm centroid
-        centroid = self.get_swarm_centroid()
-        cx = int(centroid[0] * self.ppu * self.zoom)
-        cy = int(centroid[1] * self.ppu * self.zoom)
-        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
+        # Draw centroid spine, markers, and swarm centroid
+        pts = self.draw_centroid_spine()
+        self.draw_centroid_markers(pts)
+        self.draw_swarm_centroid()
 
         # Control indicator
         self.draw_control_indicator()
@@ -349,10 +317,7 @@ class SnakeDemo(ParticleLife):
         # Draw both matrices
         self.draw_matrix_viz()
 
-        if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
-            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
-            self.screen.blit(pause_text, rect)
+        self.draw_pause_indicator()
 
     def draw_single_matrix(self, matrix, label_text, x_start, y_start, is_editing=False):
         """Draw a single matrix visualization with values and species colors."""

@@ -219,31 +219,7 @@ class SimulationVideoSaver:
             sim.screen.fill((255, 255, 255))  # White background
 
             # Draw particles
-            for i in range(sim.n):
-                pos = sim.positions[i]
-                species = sim.species[i]
-                color = sim.colors[species]
-
-                # Draw particle (meters → pixels via ppu)
-                x = int(pos[0] * sim.ppu)
-                y = int(pos[1] * sim.ppu)
-
-                if sim.show_orientations:
-                    # Draw as circle with orientation line
-                    angle = sim.orientations[i]
-                    radius = max(1, int(0.05 * sim.ppu))
-
-                    # Draw circle
-                    pygame.draw.circle(sim.screen, color, (x, y), radius)
-
-                    # Draw orientation line
-                    line_length = radius * 0.8
-                    end_x = x + line_length * np.cos(angle)
-                    end_y = y + line_length * np.sin(angle)
-                    pygame.draw.line(sim.screen, (0, 0, 0), (x, y), (end_x, end_y), 1)
-                else:
-                    # Draw simple circle
-                    pygame.draw.circle(sim.screen, color, (x, y), max(1, int(0.04 * sim.ppu)))
+            sim.draw_particles()
 
             # Draw matrices in the corner
             self.draw_matrices(sim.screen, sim)

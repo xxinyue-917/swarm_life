@@ -242,34 +242,15 @@ class MultiSpeciesDemo(ParticleLife):
         """Draw the simulation with control overlay."""
         self.screen.fill((255, 255, 255))
 
-        # Draw particles (meters → pixels via ppu)
-        for i in range(self.n):
-            color = self.colors[self.species[i]]
-            pos = self.positions[i]
-            x = int(pos[0] * self.ppu * self.zoom)
-            y = int(pos[1] * self.ppu * self.zoom)
-
-            if self.show_orientations:
-                angle = self.orientations[i]
-                radius = 0.05 * self.ppu * self.zoom
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
-                line_length = radius * 0.8
-                end_x = x + line_length * np.cos(angle)
-                end_y = y + line_length * np.sin(angle)
-                pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y),
-                               max(1, int(self.zoom)))
-            else:
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
+        # Draw particles
+        self.draw_particles()
 
         # Skip GUI elements if hidden
         if self.hide_gui:
             return
 
-        # Draw swarm centroid (meters → pixels)
-        centroid = self.get_swarm_centroid()
-        cx = int(centroid[0] * self.ppu * self.zoom)
-        cy = int(centroid[1] * self.ppu * self.zoom)
-        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
+        # Draw swarm centroid
+        self.draw_swarm_centroid()
 
         # Draw control indicators
         self.draw_control_indicator()
@@ -338,10 +319,7 @@ class MultiSpeciesDemo(ParticleLife):
         # Draw K_rot matrix visualization
         self.draw_matrix_viz()
 
-        if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
-            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
-            self.screen.blit(pause_text, rect)
+        self.draw_pause_indicator()
 
     def draw_single_matrix(self, matrix, label_text, x_start, y_start, is_editing=False):
         """Draw a single matrix visualization with values and species colors."""

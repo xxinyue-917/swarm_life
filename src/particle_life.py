@@ -573,23 +573,65 @@ class ParticleLife:
             self.positions[mask, i] = limit
             self.velocities[mask, i] = -abs(self.velocities[mask, i])
 
+    def draw_particle(self, x: int, y: int, color: tuple, r: int = None):
+        """Draw a single anti-aliased particle circle."""
+        if r is None:
+            r = max(3, int(0.04 * self.ppu * self.zoom))
+        pygame.gfxdraw.aacircle(self.screen, x, y, r, color)
+        pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
+
+    def draw_particles(self):
+        """Draw all particles with unified anti-aliased style."""
+        r = max(3, int(0.04 * self.ppu * self.zoom))
+        for i in range(self.n):
+            color = self.colors[self.species[i]]
+            x = int(self.positions[i, 0] * self.ppu * self.zoom)
+            y = int(self.positions[i, 1] * self.ppu * self.zoom)
+            pygame.gfxdraw.aacircle(self.screen, x, y, r, color)
+            pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
+
+    def to_screen(self, pos) -> tuple:
+        """Convert simulation position (meters) to screen pixels."""
+        return (int(pos[0] * self.ppu * self.zoom),
+                int(pos[1] * self.ppu * self.zoom))
+
+    def draw_pause_indicator(self):
+        """Draw PAUSED text centered at top of screen."""
+        if self.paused:
+            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
+            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
+            self.screen.blit(pause_text, rect)
+
+    def draw_centroid_spine(self, line_width=3):
+        """Draw line connecting species centroids."""
+        centroids = self.get_species_centroids()
+        pts = [self.to_screen(c) for c in centroids]
+        if len(pts) >= 2:
+            pygame.draw.lines(self.screen, (0, 0, 0), False, pts, line_width)
+        return pts
+
+    def draw_centroid_markers(self, pts=None, head_r=10, tail_r=6):
+        """Draw colored circles at species centroids."""
+        if pts is None:
+            centroids = self.get_species_centroids()
+            pts = [self.to_screen(c) for c in centroids]
+        for i, (cx, cy) in enumerate(pts):
+            r = head_r if i == 0 else tail_r
+            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), r + 2)
+            pygame.draw.circle(self.screen, self.colors[i], (cx, cy), r)
+
+    def draw_swarm_centroid(self):
+        """Draw hollow circle at swarm centroid."""
+        cx, cy = self.to_screen(self.get_swarm_centroid())
+        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
+
     def draw(self):
         """Draw the simulation"""
         # Clear screen
         self.screen.fill((255, 255, 255))  # White background
 
-        # Draw particles with orientation (meters → pixels via ppu)
-        for i in range(self.n):
-            color = self.colors[self.species[i]]
-            pos = self.positions[i]
-
-            # Convert meters to screen pixels
-            x = int(pos[0] * self.ppu * self.zoom)
-            y = int(pos[1] * self.ppu * self.zoom)
-
-            r = max(3, int(0.04 * self.ppu * self.zoom))
-            pygame.gfxdraw.aacircle(self.screen, x, y, r, color)
-            pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
+        # Draw particles
+        self.draw_particles()
 
         # Draw info panel if enabled
         if self.show_info:
@@ -638,10 +680,7 @@ class ParticleLife:
             y += 25
 
         # Draw pause indicator
-        if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
-            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
-            self.screen.blit(pause_text, rect)
+        self.draw_pause_indicator()
 
     def draw_matrix(self):
         """Draw the interaction matrix for editing"""

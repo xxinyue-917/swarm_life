@@ -450,23 +450,8 @@ class WaypointDemo(ParticleLife):
         if self.show_path:
             self.draw_path_and_waypoints()
 
-        # Draw particles (meters → pixels via ppu)
-        for i in range(self.n):
-            color = self.colors[self.species[i]]
-            pos = self.positions[i]
-            x = int(pos[0] * self.ppu * self.zoom)
-            y = int(pos[1] * self.ppu * self.zoom)
-
-            if self.show_orientations:
-                angle = self.orientations[i]
-                radius = 0.05 * self.ppu * self.zoom
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(radius)))
-                line_length = radius * 0.8
-                end_x = x + line_length * np.cos(angle)
-                end_y = y + line_length * np.sin(angle)
-                pygame.draw.line(self.screen, (0, 0, 0), (x, y), (end_x, end_y), max(1, int(self.zoom)))
-            else:
-                pygame.draw.circle(self.screen, color, (x, y), max(1, int(0.04 * self.ppu * self.zoom)))
+        # Draw particles
+        self.draw_particles()
 
         # Draw swarm centroid (meters → pixels)
         centroid = self.get_swarm_centroid()
@@ -478,23 +463,18 @@ class WaypointDemo(ParticleLife):
         if self.show_info:
             self.draw_info_panel()
 
-    def _to_screen(self, pos_m: np.ndarray) -> tuple:
-        """Convert meter position to screen pixels."""
-        return (int(pos_m[0] * self.ppu * self.zoom),
-                int(pos_m[1] * self.ppu * self.zoom))
-
     def draw_path_and_waypoints(self):
         """Draw the path line and waypoints."""
         if len(self.waypoints) < 2:
             return
 
         # Draw path line connecting waypoints (meters → pixels)
-        points = [list(self._to_screen(wp)) for wp in self.waypoints]
+        points = [list(self.to_screen(wp)) for wp in self.waypoints]
         pygame.draw.lines(self.screen, self.path_color, True, points, 2)
 
         # Draw waypoints
         for i, wp in enumerate(self.waypoints):
-            pos = self._to_screen(wp)
+            pos = self.to_screen(wp)
 
             if i == self.current_waypoint_idx:
                 pygame.draw.circle(self.screen, self.current_wp_color, pos, 12)
@@ -509,8 +489,8 @@ class WaypointDemo(ParticleLife):
             self.screen.blit(text, (pos[0] + 10, pos[1] - 10))
 
         # Draw line from centroid to current target
-        centroid_px = self._to_screen(self.get_swarm_centroid())
-        target_px = self._to_screen(self.get_current_target())
+        centroid_px = self.to_screen(self.get_swarm_centroid())
+        target_px = self.to_screen(self.get_current_target())
         pygame.draw.line(self.screen, (255, 200, 200), centroid_px, target_px, 1)
 
     def draw_info_panel(self):
@@ -555,10 +535,7 @@ class WaypointDemo(ParticleLife):
         # Draw K_rot matrix visualization
         self.draw_matrix_viz()
 
-        if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 100, 100))
-            rect = pause_text.get_rect(center=(self.config.width // 2, 30))
-            self.screen.blit(pause_text, rect)
+        self.draw_pause_indicator()
 
     def draw_matrix_viz(self):
         """Draw small visualization of K_rot matrix."""

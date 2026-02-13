@@ -77,6 +77,38 @@ presets/                # Discovered behavior configurations (JSON)
 - `step()`: Euler integration + boundary handling
 - Interactive matrix editing during runtime
 
+### Reusable Drawing API (ParticleLife base class)
+
+All demos inherit from `ParticleLife`. The following methods are available for any new demo to call directly via `self.`:
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `to_screen(pos)` | Convert sim position (meters) → screen pixels | `px = self.to_screen([1.0, 2.0])` |
+| `draw_particles()` | Draw all particles with anti-aliased circles | `self.draw_particles()` |
+| `draw_particle(x, y, color, r=None)` | Draw a single anti-aliased circle at screen coords | `self.draw_particle(100, 200, (255,0,0))` |
+| `draw_pause_indicator()` | Show "PAUSED" text when `self.paused` is True | `self.draw_pause_indicator()` |
+| `draw_centroid_spine(line_width=3)` | Draw line connecting species centroids; returns screen pts | `pts = self.draw_centroid_spine()` |
+| `draw_centroid_markers(pts=None, head_r=10, tail_r=6)` | Draw colored circles at species centroids | `self.draw_centroid_markers(pts)` |
+| `draw_swarm_centroid()` | Draw hollow circle at overall swarm centroid | `self.draw_swarm_centroid()` |
+
+**Typical demo `draw()` pattern:**
+```python
+def draw(self):
+    self.screen.fill((255, 255, 255))
+    self.draw_particles()
+    # --- demo-specific elements (walls, waypoints, etc.) ---
+    pts = self.draw_centroid_spine()
+    self.draw_centroid_markers(pts)
+    self.draw_swarm_centroid()
+    self.draw_pause_indicator()
+```
+
+**Also available but not yet in base class** (duplicated in `snake_demo`, `multi_species_demo`, `shape_formation`):
+- `draw_single_matrix()` / `draw_matrix_viz()` — matrix heatmap with edit highlighting
+- `draw_control_indicator()` — turn/speed joystick widget
+
+These depend on demo-specific state (`matrix_edit_mode`, `turn_input`, `speed_input`). Copy from an existing demo if needed.
+
 ### Metrics System (`metrics.py`)
 
 Quantitative descriptors for characterizing emergent behaviors:
