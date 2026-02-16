@@ -454,10 +454,11 @@ class WaypointDemo(ParticleLife):
         self.draw_particles()
 
         # Draw swarm centroid (meters → pixels)
-        centroid = self.get_swarm_centroid()
-        cx = int(centroid[0] * self.ppu * self.zoom)
-        cy = int(centroid[1] * self.ppu * self.zoom)
-        pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
+        if self.show_centroids:
+            centroid = self.get_swarm_centroid()
+            cx = int(centroid[0] * self.ppu * self.zoom)
+            cy = int(centroid[1] * self.ppu * self.zoom)
+            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), 8, 2)
 
         # Draw info panel
         if self.show_info:
@@ -521,8 +522,8 @@ class WaypointDemo(ParticleLife):
             "N: Skip to next waypoint",
             "P: Toggle PID",
             "T: Toggle path display",
-            "SPACE: Pause  R: Reset",
-            "Q/ESC: Quit",
+            "V: Centroids  SPACE: Pause",
+            "R: Reset  Q/ESC: Quit",
         ]
 
         y = 10
@@ -603,6 +604,9 @@ class WaypointDemo(ParticleLife):
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations

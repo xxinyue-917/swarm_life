@@ -134,6 +134,7 @@ class ParticleLife:
         self.paused = False
         self.show_info = True
         self.show_matrix = False
+        self.show_centroids = True  # Toggle centroid spine, markers, swarm centroid
         self.matrix_cursor = [0, 0]  # Row, Column for matrix editing
         self.current_matrix = "position"  # Which matrix is being edited: "position" or "orientation"
         self.show_orientations = True  # Whether to show particle orientations
@@ -660,6 +661,7 @@ class ParticleLife:
             "M - Toggle matrix editor",
             "TAB - Switch matrix (Position/Orientation)",
             "O - Toggle orientation display",
+            "V - Toggle centroid overlay",
             "SPACE - Pause/Resume",
             "R - Reset positions",
             "S - Save current configuration",
@@ -845,6 +847,11 @@ class ParticleLife:
                     # Toggle orientation display
                     self.show_orientations = not self.show_orientations
                     print(f"Show orientations: {self.show_orientations}")
+
+                elif event.key == pygame.K_v:
+                    # Toggle centroid visualization
+                    self.show_centroids = not self.show_centroids
+                    print(f"Show centroids: {self.show_centroids}")
 
                 elif event.key == pygame.K_F11 or event.key == pygame.K_f:
                     # Toggle fullscreen mode

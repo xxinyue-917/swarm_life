@@ -454,8 +454,9 @@ class SnakeMazeDemo(SnakeDemo):
             return
 
         # Draw centroid spine and markers
-        pts = self.draw_centroid_spine(line_width=2)
-        self.draw_centroid_markers(pts, head_r=8, tail_r=5)
+        if self.show_centroids:
+            pts = self.draw_centroid_spine(line_width=2)
+            self.draw_centroid_markers(pts, head_r=8, tail_r=5)
 
         # Control indicator
         self.draw_control_indicator()
@@ -546,7 +547,7 @@ class SnakeMazeDemo(SnakeDemo):
             "Controls:",
             "←/→: Steer | ↑/↓: Speed",
             "1-4: Maze layout",
-            "R: Reset | G: Goal",
+            "R: Reset | G: Goal | V: Centroids",
             "SPACE: Pause | Q: Quit",
         ]
 
@@ -585,6 +586,9 @@ class SnakeMazeDemo(SnakeDemo):
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui

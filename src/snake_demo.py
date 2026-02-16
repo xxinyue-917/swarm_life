@@ -255,9 +255,10 @@ class SnakeDemo(ParticleLife):
             return
 
         # Draw centroid spine, markers, and swarm centroid
-        pts = self.draw_centroid_spine()
-        self.draw_centroid_markers(pts)
-        self.draw_swarm_centroid()
+        if self.show_centroids:
+            pts = self.draw_centroid_spine()
+            self.draw_centroid_markers(pts)
+            self.draw_swarm_centroid()
 
         # Control indicator
         self.draw_control_indicator()
@@ -303,8 +304,8 @@ class SnakeDemo(ParticleLife):
             "←/→: Steer left/right",
             "↑/↓: Forward speed",
             "R: Reset  SPACE: Pause",
-            "O: Orientations  H: GUI",
-            "I: Toggle info  Q: Quit",
+            "O: Orientations  V: Centroids",
+            "H: GUI  I: Info  Q: Quit",
         ]
 
         y = 10
@@ -442,6 +443,9 @@ class SnakeDemo(ParticleLife):
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations

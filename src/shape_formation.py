@@ -728,9 +728,10 @@ class MultiSpeciesDemo(ParticleLife):
             return
 
         # Draw centroid spine, markers, and swarm centroid
-        pts = self.draw_centroid_spine()
-        self.draw_centroid_markers(pts)
-        self.draw_swarm_centroid()
+        if self.show_centroids:
+            pts = self.draw_centroid_spine()
+            self.draw_centroid_markers(pts)
+            self.draw_swarm_centroid()
 
         # Draw control indicators
         self.draw_control_indicator()
@@ -801,7 +802,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "",
                 "C:mode 1-4:pattern [/]:phi0",
                 "K/J:kp  D/F:kd  ←/→:bias",
-                "G:draw custom shape",
+                "G:draw shape  V:centroids",
             ]
         else:
             info_lines += [
@@ -811,7 +812,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "",
                 "C:control mode  G:draw shape",
                 "←/→:turn  ↑/↓:speed",
-                "+/-:species  R:reset",
+                "+/-:species  R:reset  V:centroids",
             ]
 
         y = 10
@@ -1011,6 +1012,9 @@ class MultiSpeciesDemo(ParticleLife):
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations

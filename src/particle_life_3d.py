@@ -551,8 +551,8 @@ class ParticleLife3D:
             "UP/DOWN - Species count",
             "LEFT/RIGHT - Particle count",
             "M - Matrix editor | TAB - Switch matrix",
-            "A - Toggle axes | SPACE - Pause",
-            "R - Reset particles",
+            "A - Toggle axes | V - Centroids",
+            "SPACE - Pause | R - Reset particles",
             "S - Save config | I - Toggle info",
             "Q/ESC - Quit",
         ]
@@ -691,6 +691,9 @@ class ParticleLife3D:
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_a and not self.show_matrix:
                     self.show_axes = not self.show_axes

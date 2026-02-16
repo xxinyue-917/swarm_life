@@ -250,7 +250,8 @@ class MultiSpeciesDemo(ParticleLife):
             return
 
         # Draw swarm centroid
-        self.draw_swarm_centroid()
+        if self.show_centroids:
+            self.draw_swarm_centroid()
 
         # Draw control indicators
         self.draw_control_indicator()
@@ -306,7 +307,7 @@ class MultiSpeciesDemo(ParticleLife):
             "↑/↓: Speed up/down",
             "+/-: Add/remove species",
             "R: Reset  SPACE: Pause",
-            "I: Toggle info  Q: Quit",
+            "V: Centroids  I: Info  Q: Quit",
         ]
 
         y = 10
@@ -480,6 +481,9 @@ class MultiSpeciesDemo(ParticleLife):
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
+
+                elif event.key == pygame.K_v:
+                    self.show_centroids = not self.show_centroids
 
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations
