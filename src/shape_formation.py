@@ -275,6 +275,11 @@ class MultiSpeciesDemo(ParticleLife):
         self.drawing_points = []
         self.custom_target_angles = None
 
+        # Visualization of extracted shape (screen-space data for overlay)
+        self.shape_vis = None          # dict with visualization data, or None
+        self.shape_vis_timer = 0.0     # seconds remaining for overlay display
+        self.shape_vis_duration = 8.0  # how long to show the overlay (seconds)
+
         # PD state arrays (sized for current n_species, reset on species change)
         self._init_control_state()
 
@@ -420,6 +425,20 @@ class MultiSpeciesDemo(ParticleLife):
         # Extract joint angles
         theta = compute_segment_angles(sampled)
         phi = compute_joint_angles(theta)
+
+        # Store visualization data (screen-space) before applying
+        smoothed_screen = smoothed.tolist()  # already screen coords
+        sampled_screen = [self.to_screen(p) for p in sampled]
+        self.shape_vis = {
+            'smoothed': smoothed_screen,       # polyline (many points)
+            'sampled': sampled_screen,          # N species points
+            'theta': theta.copy(),              # segment angles
+            'phi': phi.copy(),                  # joint angles
+            'raw_count': len(raw),
+            'smoothed_count': len(smoothed_screen),
+        }
+        self.shape_vis_timer = self.shape_vis_duration
+
         # Apply as custom target
         self.custom_target_angles = phi
         self.pattern_index = 4  # CUSTOM
@@ -577,10 +596,109 @@ class MultiSpeciesDemo(ParticleLife):
             for j in range(self.n_species):
                 self.alignment_matrix[i, j] = np.clip(K_blended[i, j], -1.0, 1.0)
 
+    def draw_shape_extraction_overlay(self):
+        """Draw visualization of the shape extraction pipeline.
+
+        Shows: smoothed curve, sampled species points, segment directions,
+        and joint angle arcs — all fading out over shape_vis_duration seconds.
+        """
+        vis = self.shape_vis
+        if vis is None or self.shape_vis_timer <= 0:
+            return
+
+        # Fade alpha: full opacity for first half, then linear fade
+        t_frac = self.shape_vis_timer / self.shape_vis_duration
+        alpha = int(255 * min(1.0, t_frac * 2))
+
+        smoothed = vis['smoothed']
+        sampled = vis['sampled']
+        theta = vis['theta']
+        phi = vis['phi']
+
+        # --- 1. Smoothed polyline (template curve) ---
+        if len(smoothed) >= 2:
+            curve_color = (180, 180, 220, alpha)
+            # Draw as dotted: every other segment
+            pts = [(int(p[0]), int(p[1])) for p in smoothed]
+            for k in range(0, len(pts) - 1, 2):
+                pygame.draw.line(self.screen, (180, 180, 220), pts[k], pts[k + 1], 1)
+
+        # --- 2. Segment lines between sampled points ---
+        for k in range(len(sampled) - 1):
+            p0 = sampled[k]
+            p1 = sampled[k + 1]
+            seg_color = (100, 100, 255)
+            pygame.draw.line(self.screen, seg_color, p0, p1, 2)
+
+        # --- 3. Sampled species points (numbered circles) ---
+        for k, (sx, sy) in enumerate(sampled):
+            # Outer ring
+            pygame.draw.circle(self.screen, (60, 60, 200), (sx, sy), 10, 2)
+            # Species index label
+            label = self.font.render(str(k), True, (60, 60, 200))
+            lrect = label.get_rect(center=(sx, sy - 16))
+            self.screen.blit(label, lrect)
+
+        # --- 4. Joint angle arcs at interior vertices ---
+        arc_radius = 25
+        for j in range(len(phi)):
+            # Joint j is at sampled point j+1 (interior vertex)
+            cx, cy = sampled[j + 1]
+            # Incoming segment angle and outgoing segment angle
+            theta_in = theta[j]
+            theta_out = theta[j + 1]
+            angle_deg = np.degrees(phi[j])
+
+            # Draw arc from incoming to outgoing direction
+            # pygame arc angles: 0 = right, CCW positive, in radians
+            # We draw the arc on the side of the bend
+            start_a = min(theta_in, theta_out)
+            end_a = max(theta_in, theta_out)
+            # Make sure we draw the shorter arc
+            if end_a - start_a > np.pi:
+                start_a, end_a = end_a, start_a + 2 * np.pi
+
+            rect = pygame.Rect(cx - arc_radius, cy - arc_radius,
+                               arc_radius * 2, arc_radius * 2)
+            # pygame.draw.arc uses screen-space angles (y-flipped)
+            # Screen y is flipped, so negate angles for display
+            pygame.draw.arc(self.screen, (220, 80, 80), rect,
+                           -end_a, -start_a, 2)
+
+            # Angle label at the arc midpoint
+            mid_a = (theta_in + theta_out) / 2
+            lx = int(cx + (arc_radius + 12) * np.cos(mid_a))
+            ly = int(cy + (arc_radius + 12) * np.sin(mid_a))
+            angle_text = self.font.render(f"{angle_deg:+.0f}\u00b0", True, (220, 80, 80))
+            arect = angle_text.get_rect(center=(lx, ly))
+            self.screen.blit(angle_text, arect)
+
+        # --- 5. Pipeline info text (top of screen) ---
+        info_lines = [
+            f"Raw: {vis['raw_count']} pts \u2192 Smoothed: {vis['smoothed_count']} pts "
+            f"\u2192 Sampled: {len(sampled)} species pts "
+            f"\u2192 {len(theta)} segments \u2192 {len(phi)} joint angles",
+        ]
+        y = 40
+        for line in info_lines:
+            text = self.font.render(line, True, (80, 80, 180))
+            rect = text.get_rect(center=(self.config.width // 2, y))
+            # Background for readability
+            bg = rect.inflate(10, 4)
+            s = pygame.Surface(bg.size, pygame.SRCALPHA)
+            s.fill((255, 255, 255, 200))
+            self.screen.blit(s, bg.topleft)
+            self.screen.blit(text, rect)
+            y += 20
+
     def step(self):
         """Perform one simulation step with control updates."""
         if self.paused:
             return
+
+        # Tick shape visualization timer
+        if self.shape_vis_timer > 0:
+            self.shape_vis_timer -= self.config.dt
 
         if self.control_mode:
             # In control mode: head_bias decays, PD controller updates K_rot
@@ -624,6 +742,9 @@ class MultiSpeciesDemo(ParticleLife):
             text = self.font.render("DRAW SHAPE (drag mouse)", True, (100, 100, 255))
             rect = text.get_rect(center=(self.config.width // 2, 60))
             self.screen.blit(text, rect)
+
+        # Shape extraction visualization overlay (fades over time)
+        self.draw_shape_extraction_overlay()
 
         # Draw info panel
         if self.show_info:
