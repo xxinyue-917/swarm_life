@@ -134,6 +134,33 @@ def compute_joint_angles(theta):
     return wrap_to_pi(np.diff(theta))
 
 
+def sample_points_uniformly(points, n_samples):
+    """
+    Uniformly sample n_samples points along a polyline by arc length.
+
+    Args:
+        points: array (N, 2) of polyline vertices
+        n_samples: number of points to sample
+
+    Returns:
+        sampled: array (n_samples, 2) of uniformly-spaced points
+    """
+    diffs = np.diff(points, axis=0)
+    seg_lengths = np.linalg.norm(diffs, axis=1)
+    cum_length = np.concatenate([[0], np.cumsum(seg_lengths)])
+    total = cum_length[-1]
+    if total < 1e-8:
+        return np.tile(points[0], (n_samples, 1))
+    targets = np.linspace(0, total, n_samples)
+    sampled = np.zeros((n_samples, 2))
+    for k, t in enumerate(targets):
+        idx = min(np.searchsorted(cum_length, t, side='right') - 1, len(points) - 2)
+        seg_len = seg_lengths[idx]
+        alpha = (t - cum_length[idx]) / seg_len if seg_len > 1e-8 else 0.0
+        sampled[k] = points[idx] + alpha * diffs[idx]
+    return sampled
+
+
 def generate_target_straight(n_joints):
     """All joint angles zero → straight chain."""
     return np.zeros(n_joints)
@@ -180,7 +207,7 @@ def generate_target_hug(n_joints, phi0):
     return target
 
 
-PATTERN_NAMES = ["STRAIGHT", "U-SHAPE", "M-SHAPE", "HUG"]
+PATTERN_NAMES = ["STRAIGHT", "U-SHAPE", "M-SHAPE", "HUG", "CUSTOM"]
 PATTERN_GENERATORS = [
     generate_target_straight,
     generate_target_u_shape,
@@ -234,13 +261,19 @@ class MultiSpeciesDemo(ParticleLife):
         self.control_mode = True        # False = manual blend, True = PD shape control
         self.pattern_index = 0          # 0=STRAIGHT, 1=U, 2=M, 3=HUG
         self.phi0 = 0.8                 # Target curvature magnitude (radians, ~46° per joint)
-        self.kp = 1.2                   # Proportional gain
-        self.kd = 0.8                   # Derivative gain (strong damping to prevent orbiting)
-        self.u_max = 0.3                # Control output clamp (small to avoid orbit feedback)
+        self.kp = 0.5                   # Proportional gain
+        self.kd = 2.0                   # Derivative gain (on raw Δφ, NOT divided by dt)
+        self.u_max = 0.15               # Control output clamp
         self.e_max = np.pi / 6          # Max error magnitude (~30°, gentle corrections only)
-        self.speed_scale = 0.5          # Multiplier before writing to K_rot
-        self.ctrl_alpha = 0.15          # Smoothing: u = (1-a)*u_prev + a*u_new
+        self.speed_scale = 0.3          # Multiplier before writing to K_rot
+        self.ctrl_alpha = 0.2           # Output smoothing (higher = more responsive)
         self.head_bias = 0.0            # Arrow-key heading offset added to first joint target
+
+        # Mouse-drawn custom shape state
+        self.drawing_mode = False
+        self.mouse_drawing = False
+        self.drawing_points = []
+        self.custom_target_angles = None
 
         # PD state arrays (sized for current n_species, reset on species change)
         self._init_control_state()
@@ -321,11 +354,12 @@ class MultiSpeciesDemo(ParticleLife):
         n_joints = max(0, S - 2)   # number of interior joints (phi has length S-2)
         n_edges = max(0, S - 1)    # number of edges (u_edge has length S-1)
         self.phi_prev = np.zeros(n_joints)
+        self.phi_filtered = np.zeros(n_joints)  # low-pass filtered phi for derivative
         self.u_edge_prev = np.zeros(n_edges)
         self.ctrl_mean_error = 0.0  # diagnostic: mean |error| across joints
 
     def _seed_phi_prev(self):
-        """Measure current joint angles and store as phi_prev.
+        """Measure current joint angles and store as phi_prev and phi_filtered.
 
         This avoids a derivative spike on the first control step
         (phi_prev=0 vs actual phi would give a huge phi_dot).
@@ -334,17 +368,82 @@ class MultiSpeciesDemo(ParticleLife):
             return
         centroids = np.array(self.get_species_centroids())
         theta = compute_segment_angles(centroids)
-        self.phi_prev = compute_joint_angles(theta)
+        phi = compute_joint_angles(theta)
+        self.phi_prev = phi.copy()
+        self.phi_filtered = phi.copy()
+
+    def from_screen(self, screen_pos):
+        """Convert screen pixels to simulation coordinates (meters)."""
+        return (screen_pos[0] / (self.ppu * self.zoom),
+                screen_pos[1] / (self.ppu * self.zoom))
+
+    def _smooth_polyline(self, points, min_spacing=5.0, smooth_passes=3):
+        """Smooth a raw mouse polyline to remove jitter.
+
+        Args:
+            points: array (N, 2) of raw screen-space points
+            min_spacing: minimum pixel distance between kept points
+            smooth_passes: number of moving-average passes
+        """
+        # 1. Downsample: keep points at least min_spacing apart
+        filtered = [points[0]]
+        for p in points[1:]:
+            if np.linalg.norm(p - filtered[-1]) >= min_spacing:
+                filtered.append(p)
+        if len(filtered) < 2:
+            filtered.append(points[-1])
+        pts = np.array(filtered, dtype=float)
+
+        # 2. Moving average smoothing (preserve endpoints)
+        for _ in range(smooth_passes):
+            if len(pts) <= 2:
+                break
+            smoothed = pts.copy()
+            for i in range(1, len(pts) - 1):
+                smoothed[i] = 0.25 * pts[i - 1] + 0.5 * pts[i] + 0.25 * pts[i + 1]
+            pts = smoothed
+
+        return pts
+
+    def _process_drawn_shape(self):
+        """Convert drawn polyline into target joint angles."""
+        if len(self.drawing_points) < 2:
+            print("Need at least 2 points to define a shape")
+            return
+        # Smooth raw mouse input to remove jitter
+        raw = np.array(self.drawing_points, dtype=float)
+        smoothed = self._smooth_polyline(raw)
+        # Screen → sim coordinates
+        sim_points = np.array([self.from_screen(p) for p in smoothed])
+        # Uniformly sample n_species points along arc length
+        sampled = sample_points_uniformly(sim_points, self.n_species)
+        # Extract joint angles
+        theta = compute_segment_angles(sampled)
+        phi = compute_joint_angles(theta)
+        # Apply as custom target
+        self.custom_target_angles = phi
+        self.pattern_index = 4  # CUSTOM
+        self.control_mode = True
+        self._init_control_state()
+        self._seed_phi_prev()
+        self.head_bias = 0.0
+        print(f"Custom shape applied: {len(phi)} joint angles extracted")
 
     def _get_target_profile(self):
         """Return the desired joint-angle array phi_star (length S-2)."""
         n_joints = max(0, self.n_species - 2)
-        gen = PATTERN_GENERATORS[self.pattern_index]
-        # STRAIGHT generator ignores phi0; others use it
-        if self.pattern_index == 0:
-            phi_star = gen(n_joints)
+        if self.pattern_index == 4:  # CUSTOM
+            if self.custom_target_angles is not None and len(self.custom_target_angles) == n_joints:
+                phi_star = self.custom_target_angles.copy()
+            else:
+                phi_star = np.zeros(n_joints)  # fallback to straight
         else:
-            phi_star = gen(n_joints, self.phi0)
+            gen = PATTERN_GENERATORS[self.pattern_index]
+            # STRAIGHT generator ignores phi0; others use it
+            if self.pattern_index == 0:
+                phi_star = gen(n_joints)
+            else:
+                phi_star = gen(n_joints, self.phi0)
         # Add head bias: offset the first joint target so arrow keys steer the head
         if n_joints > 0:
             phi_star[0] += self.head_bias
@@ -389,9 +488,14 @@ class MultiSpeciesDemo(ParticleLife):
         error = wrap_to_pi(phi_star - phi)          # (S-2,)
         error = np.clip(error, -self.e_max, self.e_max)
 
-        # Derivative: estimate joint angular rate via finite difference
-        dt = self.config.dt
-        phi_dot = wrap_to_pi(phi - self.phi_prev) / dt  # (S-2,)
+        # Low-pass filter phi before differentiation to suppress measurement noise.
+        # alpha_filt=0.3 → 70% previous + 30% new (smooth but responsive).
+        alpha_filt = 0.3
+        phi_filt = (1 - alpha_filt) * self.phi_filtered + alpha_filt * phi
+
+        # Derivative: raw difference of filtered signal (NO division by dt).
+        # Absorbing dt into kd avoids 1/dt noise amplification.
+        phi_dot = wrap_to_pi(phi_filt - self.phi_filtered)  # (S-2,)
 
         # PD law: u = kp * e - kd * phi_dot
         u_joint = self.kp * error - self.kd * phi_dot  # (S-2,)
@@ -401,6 +505,7 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Store for next step's derivative
         self.phi_prev = phi.copy()
+        self.phi_filtered = phi_filt.copy()
 
         # Diagnostic
         self.ctrl_mean_error = float(np.mean(np.abs(error)))
@@ -512,6 +617,14 @@ class MultiSpeciesDemo(ParticleLife):
         # Draw control indicators
         self.draw_control_indicator()
 
+        # Draw mode overlay
+        if self.drawing_mode:
+            if len(self.drawing_points) >= 2:
+                pygame.draw.lines(self.screen, (100, 100, 255), False, self.drawing_points, 2)
+            text = self.font.render("DRAW SHAPE (drag mouse)", True, (100, 100, 255))
+            rect = text.get_rect(center=(self.config.width // 2, 60))
+            self.screen.blit(text, rect)
+
         # Draw info panel
         if self.show_info:
             self.draw_info_panel()
@@ -567,6 +680,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "",
                 "C:mode 1-4:pattern [/]:phi0",
                 "K/J:kp  D/F:kd  ←/→:bias",
+                "G:draw custom shape",
             ]
         else:
             info_lines += [
@@ -574,7 +688,7 @@ class MultiSpeciesDemo(ParticleLife):
                 f"Turn: {self.turn_input:+.2f}",
                 f"Speed: {self.speed_input:.2f}",
                 "",
-                "C:control mode",
+                "C:control mode  G:draw shape",
                 "←/→:turn  ↑/↓:speed",
                 "+/-:species  R:reset",
             ]
@@ -717,6 +831,11 @@ class MultiSpeciesDemo(ParticleLife):
         self.edit_col = 0
         self._init_control_state()
 
+        # Invalidate custom shape (wrong joint count for new species)
+        self.custom_target_angles = None
+        if self.pattern_index == 4:
+            self.pattern_index = 0
+
         print(f"Species: {self.n_species} x {self.config.n_particles} = {self.n} particles")
 
     def _adjust_matrix_value(self, delta: float):
@@ -737,6 +856,22 @@ class MultiSpeciesDemo(ParticleLife):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+
+            # Mouse events for shape drawing
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if self.drawing_mode and event.button == 1:
+                    self.mouse_drawing = True
+                    self.drawing_points = [event.pos]
+
+            elif event.type == pygame.MOUSEMOTION:
+                if self.drawing_mode and self.mouse_drawing:
+                    self.drawing_points.append(event.pos)
+
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if self.drawing_mode and event.button == 1:
+                    self.mouse_drawing = False
+                    self._process_drawn_shape()
+                    self.drawing_mode = False
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
@@ -761,6 +896,11 @@ class MultiSpeciesDemo(ParticleLife):
 
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui
+
+                elif event.key == pygame.K_g:
+                    self.drawing_mode = True
+                    self.drawing_points = []
+                    print("Draw mode: drag mouse to draw shape")
 
                 # Species count adjustment (works in all modes except matrix edit)
                 elif not self.matrix_edit_mode and (event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS):
