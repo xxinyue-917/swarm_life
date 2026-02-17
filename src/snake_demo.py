@@ -98,7 +98,7 @@ class SnakeDemo(ParticleLife):
 
         # Control state
         self.turn_input = 0.0       # -1 (full left) to +1 (full right)
-        self.base_k_rot = 1.0       # Base rotation matrix strength
+        self.base_k_rot = 0.05      # Base rotation matrix strength (was 1.0 before angular_speed removal)
         self.forward_speed = 0.1    # Forward bias (0 = stationary, positive = move forward)
 
         # Input smoothing
