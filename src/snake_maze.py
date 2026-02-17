@@ -16,6 +16,9 @@ Controls:
     Q/ESC: Quit
 """
 
+import heapq
+from math import ceil
+
 import pygame
 import numpy as np
 from snake_demo import SnakeDemo, generate_position_matrix
@@ -308,6 +311,21 @@ class SnakeMazeDemo(SnakeDemo):
         # Re-initialize snake at start position
         self._initialize_at_start()
 
+        # --- Autopilot (A* pathfinding) ---
+        self.autopilot_active = False
+        self.autopilot_path_sim = []       # Raw A* path in sim coords
+        self.autopilot_waypoints = []      # Simplified waypoints in sim coords
+        self.autopilot_wp_idx = 0          # Current target waypoint index
+        self.autopilot_wp_threshold = 0.2  # Meters to consider waypoint reached
+
+        # Pathfinding grid
+        self.cell_size = 0.2               # Grid resolution (meters)
+        self.pathfinding_margin = 0.35     # Wall clearance for grid cells
+        self.occupancy_grid = None
+        self.grid_rows = 0
+        self.grid_cols = 0
+        self.build_occupancy_grid()
+
         print("=" * 60)
         print("Snake Maze Demo")
         print("=" * 60)
@@ -317,6 +335,7 @@ class SnakeMazeDemo(SnakeDemo):
         print("  ←/→     Steer left/right")
         print("  ↑/↓     Increase/decrease forward speed")
         print("  1-5     Select maze layout")
+        print("  A       Toggle autopilot (A* pathfinding)")
         print("  R       Reset positions")
         print("  G       Toggle goal marker")
         print("  SPACE   Pause")
@@ -408,6 +427,307 @@ class SnakeMazeDemo(SnakeDemo):
                     px, py = new_x, new_y
                     vx, vy = new_vx, new_vy
 
+    # ================================================================
+    # A* Autopilot
+    # ================================================================
+
+    def build_occupancy_grid(self):
+        """Build a boolean grid where True = blocked (wall or boundary)."""
+        sw = self.config.sim_width
+        sh = self.config.sim_height
+        self.grid_cols = ceil(sw / self.cell_size)
+        self.grid_rows = ceil(sh / self.cell_size)
+        grid = np.zeros((self.grid_rows, self.grid_cols), dtype=bool)
+
+        boundary = 0.1
+        for r in range(self.grid_rows):
+            for c in range(self.grid_cols):
+                cx = (c + 0.5) * self.cell_size
+                cy = (r + 0.5) * self.cell_size
+                # Block boundary
+                if (cx < boundary or cx > sw - boundary or
+                        cy < boundary or cy > sh - boundary):
+                    grid[r, c] = True
+                    continue
+                # Block cells near walls
+                for wall in self.walls:
+                    if wall.contains_point(cx, cy, self.pathfinding_margin):
+                        grid[r, c] = True
+                        break
+        self.occupancy_grid = grid
+
+    def sim_to_grid(self, x, y):
+        """Convert sim coords (meters) to grid cell (row, col)."""
+        c = int(x / self.cell_size)
+        r = int(y / self.cell_size)
+        return (max(0, min(r, self.grid_rows - 1)),
+                max(0, min(c, self.grid_cols - 1)))
+
+    def grid_to_sim(self, r, c):
+        """Convert grid cell (row, col) to sim coords (center of cell)."""
+        return np.array([(c + 0.5) * self.cell_size,
+                         (r + 0.5) * self.cell_size])
+
+    def _find_nearest_free(self, r, c):
+        """Find the nearest free grid cell to (r, c) via BFS."""
+        if not self.occupancy_grid[r, c]:
+            return (r, c)
+        from collections import deque
+        visited = {(r, c)}
+        queue = deque([(r, c)])
+        while queue:
+            cr, cc = queue.popleft()
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    nr, nc = cr + dr, cc + dc
+                    if (nr, nc) in visited:
+                        continue
+                    if 0 <= nr < self.grid_rows and 0 <= nc < self.grid_cols:
+                        visited.add((nr, nc))
+                        if not self.occupancy_grid[nr, nc]:
+                            return (nr, nc)
+                        queue.append((nr, nc))
+        return (r, c)  # fallback
+
+    def astar_pathfind(self, start_sim, goal_sim):
+        """A* search from start to goal in sim coordinates.
+
+        Returns list of (row, col) grid cells from start to goal,
+        or empty list if no path found.
+        """
+        sr, sc = self.sim_to_grid(start_sim[0], start_sim[1])
+        gr, gc = self.sim_to_grid(goal_sim[0], goal_sim[1])
+
+        # Snap to nearest free cell if start/goal is inside a wall
+        sr, sc = self._find_nearest_free(sr, sc)
+        gr, gc = self._find_nearest_free(gr, gc)
+
+        start = (sr, sc)
+        goal = (gr, gc)
+
+        if start == goal:
+            return [start]
+
+        # Octile heuristic
+        def h(a):
+            dr = abs(a[0] - goal[0])
+            dc = abs(a[1] - goal[1])
+            return max(dr, dc) + (1.414 - 1.0) * min(dr, dc)
+
+        # 8-directional neighbors
+        DIRS = [(-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+                (-1, -1, 1.414), (-1, 1, 1.414), (1, -1, 1.414), (1, 1, 1.414)]
+
+        g_score = {start: 0.0}
+        came_from = {}
+        counter = 0
+        open_set = [(h(start), counter, start)]
+        closed = set()
+
+        while open_set:
+            _, _, current = heapq.heappop(open_set)
+            if current == goal:
+                # Reconstruct path
+                path = [current]
+                while current in came_from:
+                    current = came_from[current]
+                    path.append(current)
+                path.reverse()
+                return path
+
+            if current in closed:
+                continue
+            closed.add(current)
+
+            cr, cc = current
+            for dr, dc, cost in DIRS:
+                nr, nc = cr + dr, cc + dc
+                if not (0 <= nr < self.grid_rows and 0 <= nc < self.grid_cols):
+                    continue
+                if self.occupancy_grid[nr, nc]:
+                    continue
+                # Prevent corner cutting for diagonals
+                if dr != 0 and dc != 0:
+                    if self.occupancy_grid[cr + dr, cc] or self.occupancy_grid[cr, cc + dc]:
+                        continue
+                neighbor = (nr, nc)
+                if neighbor in closed:
+                    continue
+                tentative_g = g_score[current] + cost
+                if tentative_g < g_score.get(neighbor, float('inf')):
+                    g_score[neighbor] = tentative_g
+                    came_from[neighbor] = current
+                    counter += 1
+                    heapq.heappush(open_set, (tentative_g + h(neighbor), counter, neighbor))
+
+        return []  # No path found
+
+    def line_of_sight(self, cell_a, cell_b):
+        """Check if all cells on the Bresenham line are free."""
+        r0, c0 = cell_a
+        r1, c1 = cell_b
+        dr = abs(r1 - r0)
+        dc = abs(c1 - c0)
+        sr = 1 if r0 < r1 else -1
+        sc = 1 if c0 < c1 else -1
+        err = dr - dc
+
+        while True:
+            if self.occupancy_grid[r0, c0]:
+                return False
+            if r0 == r1 and c0 == c1:
+                break
+            e2 = 2 * err
+            if e2 > -dc:
+                err -= dc
+                r0 += sr
+            if e2 < dr:
+                err += dr
+                c0 += sc
+        return True
+
+    def simplify_path(self, raw_path):
+        """Reduce raw grid path to sparse waypoints via line-of-sight thinning."""
+        if len(raw_path) <= 2:
+            return list(raw_path)
+
+        simplified = [raw_path[0]]
+        current_idx = 0
+
+        while current_idx < len(raw_path) - 1:
+            farthest_idx = current_idx + 1
+            for candidate_idx in range(len(raw_path) - 1, current_idx, -1):
+                if self.line_of_sight(raw_path[current_idx], raw_path[candidate_idx]):
+                    farthest_idx = candidate_idx
+                    break
+            simplified.append(raw_path[farthest_idx])
+            current_idx = farthest_idx
+
+        return simplified
+
+    def plan_autopilot_path(self):
+        """Plan A* path from current head position to goal."""
+        self.build_occupancy_grid()
+
+        head_mask = self.species == 0
+        head_centroid = self.positions[head_mask].mean(axis=0)
+
+        raw_path = self.astar_pathfind(head_centroid, self.goal_position)
+        if not raw_path:
+            print("Autopilot: No path found!")
+            self.autopilot_active = False
+            self.autopilot_path_sim = []
+            self.autopilot_waypoints = []
+            return
+
+        self.autopilot_path_sim = [self.grid_to_sim(r, c) for r, c in raw_path]
+
+        simplified = self.simplify_path(raw_path)
+        self.autopilot_waypoints = [self.grid_to_sim(r, c) for r, c in simplified]
+        self.autopilot_wp_idx = 0
+
+        print(f"Autopilot: Path planned — {len(self.autopilot_waypoints)} waypoints "
+              f"(from {len(raw_path)} grid cells)")
+
+    def get_head_heading(self):
+        """Get unit heading vector of the snake's head (species 0 → species 1 direction)."""
+        head_mask = self.species == 0
+        neck_mask = self.species == 1
+        head_centroid = self.positions[head_mask].mean(axis=0)
+        neck_centroid = self.positions[neck_mask].mean(axis=0)
+        heading = neck_centroid - head_centroid
+        norm = np.linalg.norm(heading)
+        if norm < 1e-6:
+            return np.array([1.0, 0.0])
+        return heading / norm
+
+    def update_autopilot(self):
+        """Compute and apply autopilot steering signals."""
+        if not self.autopilot_waypoints:
+            return
+
+        # Head position
+        head_mask = self.species == 0
+        head_centroid = self.positions[head_mask].mean(axis=0)
+
+        # Check waypoint reached
+        current_wp = self.autopilot_waypoints[self.autopilot_wp_idx]
+        dist_to_wp = np.linalg.norm(head_centroid - current_wp)
+
+        if dist_to_wp < self.autopilot_wp_threshold:
+            if self.autopilot_wp_idx < len(self.autopilot_waypoints) - 1:
+                self.autopilot_wp_idx += 1
+                current_wp = self.autopilot_waypoints[self.autopilot_wp_idx]
+                dist_to_wp = np.linalg.norm(head_centroid - current_wp)
+            else:
+                # Final waypoint reached
+                self.turn_input = 0.0
+                return
+
+        # Desired direction
+        desired = current_wp - head_centroid
+        desired_norm = np.linalg.norm(desired)
+        if desired_norm < 1e-6:
+            return
+        desired_dir = desired / desired_norm
+
+        # Current heading
+        heading = self.get_head_heading()
+
+        # Full signed angular error via atan2 (handles 180° correctly)
+        cross = heading[0] * desired_dir[1] - heading[1] * desired_dir[0]
+        dot = heading[0] * desired_dir[0] + heading[1] * desired_dir[1]
+        angular_error = np.arctan2(cross, dot)  # range [-pi, pi]
+
+        # Nudge turn_input like pressing arrow keys — small increments per frame
+        # Let the existing turn_decay handle smoothing
+        nudge = 0.03
+        dead_zone = 0.1
+        if angular_error > dead_zone:
+            # Target is to the left — nudge left
+            self.turn_input = max(-1.0, self.turn_input - nudge)
+        elif angular_error < -dead_zone:
+            # Target is to the right — nudge right
+            self.turn_input = min(1.0, self.turn_input + nudge)
+        # Otherwise: do nothing, let turn_decay bring it back to 0
+
+    def draw_autopilot_path(self):
+        """Draw the A* path and waypoints on screen."""
+        # Waypoint path (straight lines between waypoints)
+        if len(self.autopilot_waypoints) >= 2:
+            points = [self.to_screen(wp) for wp in self.autopilot_waypoints]
+            pygame.draw.lines(self.screen, (180, 190, 210), False, points, 2)
+
+        # Waypoints
+        for i, wp in enumerate(self.autopilot_waypoints):
+            sx, sy = self.to_screen(wp)
+            if i < self.autopilot_wp_idx:
+                # Past (green)
+                pygame.draw.circle(self.screen, (150, 220, 150), (sx, sy), 5)
+            elif i == self.autopilot_wp_idx:
+                # Current target (red with ring)
+                pygame.draw.circle(self.screen, (255, 200, 200), (sx, sy), 12, 2)
+                pygame.draw.circle(self.screen, (255, 80, 80), (sx, sy), 6)
+            else:
+                # Future (yellow)
+                pygame.draw.circle(self.screen, (240, 200, 80), (sx, sy), 5)
+
+        # Line from head to current waypoint
+        if self.autopilot_waypoints and self.autopilot_wp_idx < len(self.autopilot_waypoints):
+            head_mask = self.species == 0
+            head_centroid = self.positions[head_mask].mean(axis=0)
+            head_screen = self.to_screen(head_centroid)
+            wp_screen = self.to_screen(self.autopilot_waypoints[self.autopilot_wp_idx])
+            pygame.draw.line(self.screen, (255, 120, 120), head_screen, wp_screen, 2)
+
+        # "AUTOPILOT" badge
+        label = self.font.render("AUTOPILOT", True, (50, 120, 50))
+        bg_rect = label.get_rect(topright=(self.config.width - 10, self.config.height - 35))
+        bg = bg_rect.inflate(12, 6)
+        pygame.draw.rect(self.screen, (220, 255, 220), bg)
+        pygame.draw.rect(self.screen, (100, 200, 100), bg, 2)
+        self.screen.blit(label, bg_rect)
+
     def step(self):
         """Perform one simulation step with wall collisions."""
         if self.paused:
@@ -417,6 +737,10 @@ class SnakeMazeDemo(SnakeDemo):
         self.turn_input *= self.turn_decay
         if abs(self.turn_input) < 0.01:
             self.turn_input = 0.0
+
+        # Autopilot overrides turn_input before it reaches K_rot
+        if self.autopilot_active:
+            self.update_autopilot()
 
         # Update K_rot from input
         self.update_matrices_from_input()
@@ -432,6 +756,12 @@ class SnakeMazeDemo(SnakeDemo):
         # Check goal
         self.check_goal()
 
+        # Disengage autopilot when goal reached
+        if self.goal_reached and self.autopilot_active:
+            self.autopilot_active = False
+            self.turn_input = 0.0
+            print("Autopilot: Goal reached, disengaging.")
+
     def draw(self):
         """Draw simulation with maze and goal."""
         self.screen.fill((250, 250, 252))  # Slightly off-white background
@@ -442,6 +772,10 @@ class SnakeMazeDemo(SnakeDemo):
 
         # Draw walls
         self.draw_walls()
+
+        # Draw autopilot path (between walls and goal layers)
+        if self.autopilot_active and self.autopilot_waypoints:
+            self.draw_autopilot_path()
 
         # Draw goal
         if self.show_goal:
@@ -537,16 +871,23 @@ class SnakeMazeDemo(SnakeDemo):
         """Draw information panel."""
         maze_name = MAZE_LAYOUTS[self.current_maze_id][0]
 
+        auto_status = "ON" if self.autopilot_active else "OFF"
         info_lines = [
             f"FPS: {int(self.clock.get_fps())}",
             f"Maze: {maze_name}",
+            f"Autopilot: {auto_status}",
             "",
             f"Turn: {self.turn_input:+.2f}",
             f"Speed: {self.forward_speed:+.2f}",
+        ]
+        if self.autopilot_active and self.autopilot_waypoints:
+            info_lines.append(
+                f"Waypoint: {self.autopilot_wp_idx + 1}/{len(self.autopilot_waypoints)}")
+        info_lines += [
             "",
             "Controls:",
             "←/→: Steer | ↑/↓: Speed",
-            "1-4: Maze layout",
+            "1-5: Maze | A: Autopilot",
             "R: Reset | G: Goal | V: Centroids",
             "SPACE: Pause | Q: Quit",
         ]
@@ -578,6 +919,8 @@ class SnakeMazeDemo(SnakeDemo):
                     self.turn_input = 0.0
                     self.turn_history[:] = 0.0
                     self.history_idx = 0
+                    if self.autopilot_active:
+                        self.plan_autopilot_path()
                     print("Reset positions")
 
                 elif event.key == pygame.K_g:
@@ -593,22 +936,24 @@ class SnakeMazeDemo(SnakeDemo):
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui
 
+                elif event.key == pygame.K_a:
+                    if not self.goal_reached:
+                        self.autopilot_active = not self.autopilot_active
+                        if self.autopilot_active:
+                            self.plan_autopilot_path()
+                        else:
+                            self.turn_input = 0.0
+                        print(f"Autopilot: {'ON' if self.autopilot_active else 'OFF'}")
+
                 # Maze selection (1-5)
-                elif event.key == pygame.K_1:
-                    self.load_maze(1)
+                elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3,
+                                   pygame.K_4, pygame.K_5):
+                    maze_num = event.key - pygame.K_0
+                    self.load_maze(maze_num)
                     self._initialize_at_start()
-                elif event.key == pygame.K_2:
-                    self.load_maze(2)
-                    self._initialize_at_start()
-                elif event.key == pygame.K_3:
-                    self.load_maze(3)
-                    self._initialize_at_start()
-                elif event.key == pygame.K_4:
-                    self.load_maze(4)
-                    self._initialize_at_start()
-                elif event.key == pygame.K_5:
-                    self.load_maze(5)
-                    self._initialize_at_start()
+                    self.build_occupancy_grid()
+                    if self.autopilot_active:
+                        self.plan_autopilot_path()
 
                 # Forward speed adjustment
                 elif event.key == pygame.K_UP:
@@ -616,12 +961,13 @@ class SnakeMazeDemo(SnakeDemo):
                 elif event.key == pygame.K_DOWN:
                     self.update_forward_speed(-0.05)
 
-        # Continuous arrow key input for steering
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT]:
-            self.turn_input = max(-1.0, self.turn_input - 0.05)
-        if keys[pygame.K_RIGHT]:
-            self.turn_input = min(1.0, self.turn_input + 0.05)
+        # Continuous arrow key input for steering (disabled during autopilot)
+        if not self.autopilot_active:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT]:
+                self.turn_input = max(-1.0, self.turn_input - 0.05)
+            if keys[pygame.K_RIGHT]:
+                self.turn_input = min(1.0, self.turn_input + 0.05)
 
         return True
 
