@@ -23,7 +23,7 @@ from math import ceil
 
 import pygame
 import numpy as np
-from snake_demo import SnakeDemo, generate_position_matrix
+from snake_demo import SnakeDemo
 
 
 # =============================================================================
@@ -110,156 +110,111 @@ class Wall:
         return new_x, new_y, new_vx, new_vy
 
 
-def create_maze_simple(sim_width: float, sim_height: float) -> list:
-    """
-    Simple maze: Single obstacle in center with clear path around.
-    Start: left middle, Goal: right middle
-    """
-    walls = []
-    t = 0.2  # wall thickness
-    cx, cy = sim_width / 2, sim_height / 2
-
-    # Central block obstacle - snake must go around it
-    block_w, block_h = 2.0, 4.0
-    walls.append(Wall(cx - block_w/2, cy - block_h/2, block_w, block_h))
-
+def create_maze_open(sim_width: float, sim_height: float) -> list:
+    """Open field with a central cross obstacle. Easiest maze."""
+    w, h = sim_width, sim_height
+    t = 0.15
+    cx, cy = w / 2, h / 2
+    walls = [
+        Wall(cx - t/2, cy - 2.5, t, 2.0),   # cross top arm
+        Wall(cx - t/2, cy + 0.5, t, 2.0),    # cross bottom arm
+        Wall(cx - 2.5, cy - t/2, 2.0, t),    # cross left arm
+        Wall(cx + 0.5, cy - t/2, 2.0, t),    # cross right arm
+    ]
     return walls
 
 
-def create_maze_corridor(sim_width: float, sim_height: float) -> list:
-    """
-    S-Curve corridor: Smooth path requiring steering.
-    Wide enough for snake (2.5m corridors).
-    """
-    walls = []
-    t = 0.2  # wall thickness
-
-    # Upper boundary
-    walls.append(Wall(0, 1.0, sim_width, t))
-    # Lower boundary
-    walls.append(Wall(0, sim_height - 1.0 - t, sim_width, t))
-
-    # First bend: wall from top, gap at bottom
-    walls.append(Wall(3.0, 1.0, t, 4.5))
-
-    # Second bend: wall from bottom, gap at top
-    walls.append(Wall(5.5, sim_height - 5.5, t, 4.5))
-
-    # Third bend: wall from top, gap at bottom
-    walls.append(Wall(8.0, 1.0, t, 4.5))
-
+def create_maze_slalom(sim_width: float, sim_height: float) -> list:
+    """Slalom: alternating horizontal walls with gaps on opposite sides."""
+    w, h = sim_width, sim_height
+    t = 0.15
+    gap = 2.5
+    walls = [
+        # Wall from left, gap on right
+        Wall(0, 2.5 - t/2, w - gap, t),
+        # Wall from right, gap on left
+        Wall(gap, 5.0 - t/2, w - gap, t),
+        # Wall from left, gap on right
+        Wall(0, 7.5 - t/2, w - gap, t),
+    ]
     return walls
 
 
-def create_maze_zigzag(sim_width: float, sim_height: float) -> list:
-    """
-    Zigzag maze: Alternating horizontal barriers with gaps.
-    Forces snake to navigate up and down.
-    """
-    walls = []
-    t = 0.2  # wall thickness
-    gap = 2.5  # gap width for snake to pass
+def create_maze_spiral(sim_width: float, sim_height: float) -> list:
+    """Spiral: concentric rectangular walls with alternating openings."""
+    w, h = sim_width, sim_height
+    t = 0.15
+    gap = 2.0
+    walls = [
+        # Outer ring — opening at bottom-left
+        Wall(0, h - t, w, t),             # top
+        Wall(w - t, 0, t, h - t),         # right
+        Wall(gap, 0, w - gap - t, t),     # bottom (gap on left)
 
-    # Row 1: wall from left, gap on right
-    walls.append(Wall(0.5, 2.5, sim_width - gap - 1.0, t))
+        # Middle ring — opening at top-right
+        Wall(2.0, 2.0, t, h - 4.0),              # left
+        Wall(2.0, h - 2.0 - t, w - 4.0 - gap, t),  # top (gap on right)
+        Wall(2.0, 2.0, w - 4.0, t),              # bottom
+        Wall(w - 2.0 - t, 2.0, t, h - 4.0 - gap),  # right (gap at top)
 
-    # Row 2: wall from right, gap on left
-    walls.append(Wall(gap + 0.5, 5.0, sim_width - gap - 1.0, t))
-
-    # Row 3: wall from left, gap on right
-    walls.append(Wall(0.5, 7.5, sim_width - gap - 1.0, t))
-
+        # Inner block
+        Wall(4.0, 4.0, w - 8.0, h - 8.0),
+    ]
     return walls
 
 
-def create_maze_chambers(sim_width: float, sim_height: float) -> list:
-    """
-    Chamber maze: Three connected rooms with doorways.
-    Clear structure, requires navigation through doorways.
-    """
-    walls = []
-    t = 0.2  # wall thickness
-    door_width = 2.5  # doorway width
+def create_maze_rooms(sim_width: float, sim_height: float) -> list:
+    """Four rooms with offset doorways forcing a winding path."""
+    w, h = sim_width, sim_height
+    t = 0.15
+    cx, cy = w / 2, h / 2
+    door = 2.0  # doorway width
 
-    cy = sim_height / 2
+    walls = [
+        # Horizontal divider — door on right half
+        Wall(0, cy - t/2, cx - door/2, t),              # left section
+        Wall(cx + door + 1.0, cy - t/2, w - cx - door - 1.0, t),  # right section
 
-    # First vertical wall (between room 1 and 2) with door at top
-    x1 = 3.5
-    walls.append(Wall(x1, cy - door_width/2 + 1.0, t, cy - door_width/2))  # bottom part
-    walls.append(Wall(x1, 0.5, t, cy - door_width/2 - 0.5))  # top part... wait let me recalculate
-
-    # Let me think more carefully:
-    # Room divider at x=3.5, door in upper half
-    door_top = 2.0  # door starts at y=2.0
-    door_bottom = door_top + door_width  # door ends at y=4.5
-    walls.append(Wall(x1, 0.5, t, door_top - 0.5))  # wall above door
-    walls.append(Wall(x1, door_bottom, t, sim_height - door_bottom - 0.5))  # wall below door
-
-    # Second vertical wall (between room 2 and 3) with door at bottom
-    x2 = 6.5
-    door_top2 = sim_height - door_width - 2.0  # door in lower portion
-    door_bottom2 = door_top2 + door_width
-    walls.append(Wall(x2, 0.5, t, door_top2 - 0.5))  # wall above door
-    walls.append(Wall(x2, door_bottom2, t, sim_height - door_bottom2 - 0.5))  # wall below door
-
+        # Vertical divider — door at top in left half, door at bottom in right half
+        Wall(cx - t/2, 0, t, cy - door - 0.5),                   # bottom-left
+        Wall(cx - t/2, cy + t/2, t, door + 0.5),                 # middle (between doors)
+        Wall(cx - t/2, cy + door + 1.5, t, h - cy - door - 1.5), # top-left
+    ]
     return walls
 
 
-def create_maze_z_tunnel(sim_width: float, sim_height: float) -> list:
-    """
-    Z-shaped tunnel: A confined Z-shaped corridor.
+def create_maze_labyrinth(sim_width: float, sim_height: float) -> list:
+    """Dense labyrinth with many turns — hardest hand-crafted maze."""
+    w, h = sim_width, sim_height
+    t = 0.15
+    walls = [
+        # Row 1 barriers
+        Wall(2.0, 1.5, 3.0, t),
+        Wall(7.0, 1.5, 2.0, t),
 
-    Layout (10m x 10m):
-        ENTRY →═══════════╗
-                          ║
-                 ╔════════╝
-                 ║
-                 ╚════════→ EXIT
+        # Row 2 barriers
+        Wall(0, 3.2, 2.0, t),
+        Wall(3.5, 3.2, 2.5, t),
+        Wall(8.0, 3.2, 2.0, t),
 
-    The snake must navigate through the Z-shaped tunnel.
-    Tunnel width: ~2m for comfortable snake navigation.
-    """
-    walls = []
-    t = 0.2  # wall thickness
-    tw = 2.0  # tunnel width
+        # Row 3 barriers
+        Wall(1.5, 5.0, 3.0, t),
+        Wall(6.0, 5.0, 1.5, t),
 
-    # Z-tunnel layout:
-    # Top corridor:    y = 1.5 to 3.5, x = entry(open) to 7.5
-    # Vertical:        x = 5.5 to 7.5, y = 3.5 to 6.5
-    # Bottom corridor: y = 6.5 to 8.5, x = 2.5 to exit(open)
+        # Row 4 barriers
+        Wall(0, 6.8, 1.5, t),
+        Wall(3.0, 6.8, 2.5, t),
+        Wall(7.5, 6.8, 2.5, t),
 
-    # === TOP CORRIDOR ===
-    # Upper wall of top corridor (from left edge to right turn)
-    walls.append(Wall(0.0, 1.5, 7.5 + t, t))
+        # Row 5 barriers
+        Wall(2.0, 8.5, 4.0, t),
+        Wall(8.0, 8.5, 2.0, t),
 
-    # Lower wall of top corridor (stops before vertical connector)
-    walls.append(Wall(0.0, 3.5, 5.5, t))
-
-    # === VERTICAL CONNECTOR ===
-    # Left wall of vertical section
-    walls.append(Wall(5.5, 3.5 + t, t, 3.0 - t))
-
-    # Right wall of vertical section (connects top to bottom)
-    walls.append(Wall(7.5, 1.5 + t, t, 5.0))
-
-    # === BOTTOM CORRIDOR ===
-    # Upper wall of bottom corridor (starts after vertical connector)
-    walls.append(Wall(2.5, 6.5, 3.0, t))
-
-    # Lower wall of bottom corridor (from left cap to right edge)
-    walls.append(Wall(2.5, 8.5, 7.5, t))
-
-    # === ENCLOSURE WALLS ===
-    # Left cap of bottom corridor
-    walls.append(Wall(2.5, 6.5 + t, t, tw - t))
-
-    # Left boundary wall (connects top corridor to bottom corridor area)
-    walls.append(Wall(0.0, 3.5 + t, t, 3.0 - t))
-
-    # Bottom-left corner (connects left boundary to bottom corridor)
-    walls.append(Wall(0.0, 6.5 + t, 2.5, t))
-    walls.append(Wall(0.0, 8.5, 2.5 + t, t))
-
+        # Vertical obstacles for extra turns
+        Wall(5.5, 1.5, t, 2.0),
+        Wall(2.5, 5.0, t, 2.0),
+        Wall(7.5, 5.0, t, 2.0),
+    ]
     return walls
 
 
@@ -345,11 +300,11 @@ def create_maze_random(sim_width: float, sim_height: float,
 
 
 MAZE_LAYOUTS = {
-    1: ("Simple", create_maze_simple),
-    2: ("S-Curve", create_maze_corridor),
-    3: ("Zigzag", create_maze_zigzag),
-    4: ("Chambers", create_maze_chambers),
-    5: ("Z-Tunnel", create_maze_z_tunnel),
+    1: ("Open", create_maze_open),
+    2: ("Slalom", create_maze_slalom),
+    3: ("Spiral", create_maze_spiral),
+    4: ("Rooms", create_maze_rooms),
+    5: ("Labyrinth", create_maze_labyrinth),
     6: ("Random", create_maze_random),
 }
 
@@ -375,11 +330,10 @@ class SnakeMazeDemo(SnakeDemo):
         self.walls = []
         self.current_maze_id = maze_id
 
-        # Start and goal positions (will be set by load_maze)
-        self.start_position = np.array([1.5, self.config.sim_height / 2])
-        self.goal_position = np.array([self.config.sim_width - 1.5,
-                                        self.config.sim_height / 2])
-        self.goal_radius = 0.6  # meters
+        # Start and goal positions (set by load_maze)
+        self.start_position = np.array([1.0, 1.0])
+        self.goal_position = np.array([9.0, 9.0])
+        self.goal_radius = 0.6
         self.show_goal = True
         self.goal_reached = False
 
@@ -397,7 +351,6 @@ class SnakeMazeDemo(SnakeDemo):
 
         # --- Autopilot (A* pathfinding) ---
         self.autopilot_active = False
-        self.autopilot_path_sim = []       # Raw A* path in sim coords
         self.autopilot_waypoints = []      # Simplified waypoints in sim coords
         self.autopilot_wp_idx = 0          # Current target waypoint index
         self.autopilot_wp_threshold = 0.2  # Meters to consider waypoint reached
@@ -422,7 +375,7 @@ class SnakeMazeDemo(SnakeDemo):
         print("  G       Generate new random maze")
         print("  A       Toggle autopilot (A* pathfinding)")
         print("  R       Reset positions")
-        print("  G       Toggle goal marker")
+        print("  M       Toggle goal marker")
         print("  SPACE   Pause")
         print("  Q/ESC   Quit")
         print("=" * 60)
@@ -436,30 +389,10 @@ class SnakeMazeDemo(SnakeDemo):
         name, generator = MAZE_LAYOUTS[maze_id]
         self.walls = generator(self.config.sim_width, self.config.sim_height)
 
-        # Set start and goal positions based on maze type
+        # All mazes: start bottom-left corner, goal top-right corner
         w, h = self.config.sim_width, self.config.sim_height
-
-        if maze_id == 1:  # Simple - center obstacle
-            self.start_position = np.array([1.5, h / 2])
-            self.goal_position = np.array([w - 1.5, h / 2])
-        elif maze_id == 2:  # S-Curve
-            self.start_position = np.array([1.5, h / 2])
-            self.goal_position = np.array([w - 1.5, h / 2])
-        elif maze_id == 3:  # Zigzag
-            self.start_position = np.array([1.5, 1.5])
-            self.goal_position = np.array([w - 1.5, h - 1.5])
-        elif maze_id == 4:  # Chambers
-            self.start_position = np.array([1.5, h / 2])
-            self.goal_position = np.array([w - 1.5, h / 2])
-        elif maze_id == 5:  # Z-Tunnel
-            # Start at top-left entry, goal at bottom-right exit
-            self.start_position = np.array([1.0, 2.5])  # middle of top corridor (y=1.5 to 3.5)
-            self.goal_position = np.array([w - 1.0, 7.5])  # middle of bottom corridor (y=6.5 to 8.5)
-        elif maze_id == 6:  # Random — corner to corner
-            cell_w = w / 5
-            cell_h = h / 5
-            self.start_position = np.array([cell_w / 2, cell_h / 2])
-            self.goal_position = np.array([w - cell_w / 2, h - cell_h / 2])
+        self.start_position = np.array([1.0, 1.0])
+        self.goal_position = np.array([w - 1.0, h - 1.0])
 
         print(f"Loaded maze: {name} ({len(self.walls)} walls)")
 
@@ -706,11 +639,8 @@ class SnakeMazeDemo(SnakeDemo):
         if not raw_path:
             print("Autopilot: No path found!")
             self.autopilot_active = False
-            self.autopilot_path_sim = []
             self.autopilot_waypoints = []
             return
-
-        self.autopilot_path_sim = [self.grid_to_sim(r, c) for r, c in raw_path]
 
         simplified = self.simplify_path(raw_path)
         self.autopilot_waypoints = [self.grid_to_sim(r, c) for r, c in simplified]
