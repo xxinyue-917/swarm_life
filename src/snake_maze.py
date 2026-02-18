@@ -7,16 +7,18 @@ Arrow keys steer the head, walls block movement.
 
 Controls:
     ←/→:   Steer head left/right
-    1-4:   Select maze layout
+    1-6:   Select maze layout (6=Random)
+    G:     Generate new random maze
     R:     Reset positions
     SPACE: Pause/Resume
-    G:     Toggle goal marker
+    M:     Toggle goal marker
     H:     Hide/show all GUI
     I:     Toggle info panel
     Q/ESC: Quit
 """
 
 import heapq
+import random
 from math import ceil
 
 import pygame
@@ -261,12 +263,94 @@ def create_maze_z_tunnel(sim_width: float, sim_height: float) -> list:
     return walls
 
 
+def create_maze_random(sim_width: float, sim_height: float,
+                       cols: int = 5, rows: int = 5) -> list:
+    """
+    Procedural maze using recursive backtracking (DFS).
+    Generates a perfect maze — exactly one path between any two cells.
+    Start: bottom-left corner, Goal: top-right corner.
+    """
+    # Cell dimensions in sim coords
+    cell_w = sim_width / cols
+    cell_h = sim_height / rows
+    t = 0.15  # wall thickness
+
+    # Track which walls have been removed
+    # Each cell stores a set of removed directions
+    removed = [[set() for _ in range(cols)] for _ in range(rows)]
+
+    # Recursive backtracking (iterative with stack)
+    visited = [[False] * cols for _ in range(rows)]
+    stack = [(0, 0)]
+    visited[0][0] = True
+
+    directions = {
+        'N': (1, 0),   # row+1 (up in sim coords)
+        'S': (-1, 0),  # row-1 (down)
+        'E': (0, 1),   # col+1 (right)
+        'W': (0, -1),  # col-1 (left)
+    }
+    opposite = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+
+    while stack:
+        r, c = stack[-1]
+        neighbors = []
+        for d, (dr, dc) in directions.items():
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc]:
+                neighbors.append((d, nr, nc))
+
+        if neighbors:
+            d, nr, nc = random.choice(neighbors)
+            removed[r][c].add(d)
+            removed[nr][nc].add(opposite[d])
+            visited[nr][nc] = True
+            stack.append((nr, nc))
+        else:
+            stack.pop()
+
+    # Convert remaining walls to Wall objects
+    walls = []
+
+    for r in range(rows):
+        for c in range(cols):
+            x0 = c * cell_w  # left edge of cell
+            y0 = r * cell_h  # bottom edge of cell
+
+            # South wall (bottom edge) — only for row 0, or if not removed
+            if r == 0:
+                if 'S' not in removed[r][c]:
+                    walls.append(Wall(x0, y0 - t / 2, cell_w, t))
+            # North wall (top edge) — emit for top row, or internal if not removed
+            if r == rows - 1:
+                if 'N' not in removed[r][c]:
+                    walls.append(Wall(x0, y0 + cell_h - t / 2, cell_w, t))
+            elif 'N' not in removed[r][c]:
+                # Internal horizontal wall between row r and r+1
+                walls.append(Wall(x0, y0 + cell_h - t / 2, cell_w, t))
+
+            # West wall (left edge) — only for col 0, or if not removed
+            if c == 0:
+                if 'W' not in removed[r][c]:
+                    walls.append(Wall(x0 - t / 2, y0, t, cell_h))
+            # East wall (right edge) — emit for rightmost col, or internal if not removed
+            if c == cols - 1:
+                if 'E' not in removed[r][c]:
+                    walls.append(Wall(x0 + cell_w - t / 2, y0, t, cell_h))
+            elif 'E' not in removed[r][c]:
+                # Internal vertical wall between col c and c+1
+                walls.append(Wall(x0 + cell_w - t / 2, y0, t, cell_h))
+
+    return walls
+
+
 MAZE_LAYOUTS = {
     1: ("Simple", create_maze_simple),
     2: ("S-Curve", create_maze_corridor),
     3: ("Zigzag", create_maze_zigzag),
     4: ("Chambers", create_maze_chambers),
     5: ("Z-Tunnel", create_maze_z_tunnel),
+    6: ("Random", create_maze_random),
 }
 
 
@@ -334,7 +418,8 @@ class SnakeMazeDemo(SnakeDemo):
         print("Controls:")
         print("  ←/→     Steer left/right")
         print("  ↑/↓     Increase/decrease forward speed")
-        print("  1-5     Select maze layout")
+        print("  1-6     Select maze layout (6=Random)")
+        print("  G       Generate new random maze")
         print("  A       Toggle autopilot (A* pathfinding)")
         print("  R       Reset positions")
         print("  G       Toggle goal marker")
@@ -370,6 +455,11 @@ class SnakeMazeDemo(SnakeDemo):
             # Start at top-left entry, goal at bottom-right exit
             self.start_position = np.array([1.0, 2.5])  # middle of top corridor (y=1.5 to 3.5)
             self.goal_position = np.array([w - 1.0, 7.5])  # middle of bottom corridor (y=6.5 to 8.5)
+        elif maze_id == 6:  # Random — corner to corner
+            cell_w = w / 5
+            cell_h = h / 5
+            self.start_position = np.array([cell_w / 2, cell_h / 2])
+            self.goal_position = np.array([w - cell_w / 2, h - cell_h / 2])
 
         print(f"Loaded maze: {name} ({len(self.walls)} walls)")
 
@@ -887,8 +977,8 @@ class SnakeMazeDemo(SnakeDemo):
             "",
             "Controls:",
             "←/→: Steer | ↑/↓: Speed",
-            "1-5: Maze | A: Autopilot",
-            "R: Reset | G: Goal | V: Centroids",
+            "1-6: Maze | G: New Random",
+            "A: Autopilot | R: Reset | V: Centroids",
             "SPACE: Pause | Q: Quit",
         ]
 
@@ -924,6 +1014,15 @@ class SnakeMazeDemo(SnakeDemo):
                     print("Reset positions")
 
                 elif event.key == pygame.K_g:
+                    # Generate new random maze
+                    self.load_maze(6)
+                    self._initialize_at_start()
+                    self.build_occupancy_grid()
+                    if self.autopilot_active:
+                        self.plan_autopilot_path()
+                    print("Generated new random maze")
+
+                elif event.key == pygame.K_m:
                     self.show_goal = not self.show_goal
                     print(f"Show goal: {self.show_goal}")
 
@@ -945,9 +1044,9 @@ class SnakeMazeDemo(SnakeDemo):
                             self.turn_input = 0.0
                         print(f"Autopilot: {'ON' if self.autopilot_active else 'OFF'}")
 
-                # Maze selection (1-5)
+                # Maze selection (1-6)
                 elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3,
-                                   pygame.K_4, pygame.K_5):
+                                   pygame.K_4, pygame.K_5, pygame.K_6):
                     maze_num = event.key - pygame.K_0
                     self.load_maze(maze_num)
                     self._initialize_at_start()
