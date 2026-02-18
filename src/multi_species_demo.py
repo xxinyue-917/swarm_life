@@ -253,11 +253,9 @@ class MultiSpeciesDemo(ParticleLife):
         if self.show_centroids:
             self.draw_swarm_centroid()
 
-        # Draw control indicators
-        self.draw_control_indicator()
-
-        # Draw info panel
+        # Draw info panel and control indicators
         if self.show_info:
+            self.draw_control_indicator()
             self.draw_info_panel()
 
     def draw_control_indicator(self):

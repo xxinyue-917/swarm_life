@@ -733,10 +733,7 @@ class MultiSpeciesDemo(ParticleLife):
             self.draw_centroid_markers(pts)
             self.draw_swarm_centroid()
 
-        # Draw control indicators
-        self.draw_control_indicator()
-
-        # Draw mode overlay
+        # Draw mode overlay (always visible during drawing)
         if self.drawing_mode:
             if len(self.drawing_points) >= 2:
                 pygame.draw.lines(self.screen, (100, 100, 255), False, self.drawing_points, 2)
@@ -744,11 +741,10 @@ class MultiSpeciesDemo(ParticleLife):
             rect = text.get_rect(center=(self.config.width // 2, 60))
             self.screen.blit(text, rect)
 
-        # Shape extraction visualization overlay (fades over time)
-        self.draw_shape_extraction_overlay()
-
-        # Draw info panel
+        # Draw info panel, control indicators, and overlays
         if self.show_info:
+            self.draw_control_indicator()
+            self.draw_shape_extraction_overlay()
             self.draw_info_panel()
 
     def draw_control_indicator(self):

@@ -260,11 +260,9 @@ class SnakeDemo(ParticleLife):
             self.draw_centroid_markers(pts)
             self.draw_swarm_centroid()
 
-        # Control indicator
-        self.draw_control_indicator()
-
-        # Info panel
+        # Info panel and control indicator
         if self.show_info:
+            self.draw_control_indicator()
             self.draw_info_panel()
 
     def draw_control_indicator(self):

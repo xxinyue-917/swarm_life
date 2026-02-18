@@ -740,13 +740,6 @@ class SnakeMazeDemo(SnakeDemo):
             wp_screen = self.to_screen(self.autopilot_waypoints[self.autopilot_wp_idx])
             pygame.draw.line(self.screen, (255, 120, 120), head_screen, wp_screen, 2)
 
-        # "AUTOPILOT" badge
-        label = self.font.render("AUTOPILOT", True, (50, 120, 50))
-        bg_rect = label.get_rect(topright=(self.config.width - 10, self.config.height - 35))
-        bg = bg_rect.inflate(12, 6)
-        pygame.draw.rect(self.screen, (220, 255, 220), bg)
-        pygame.draw.rect(self.screen, (100, 200, 100), bg, 2)
-        self.screen.blit(label, bg_rect)
 
     def step(self):
         """Perform one simulation step with wall collisions."""
@@ -812,11 +805,9 @@ class SnakeMazeDemo(SnakeDemo):
             pts = self.draw_centroid_spine(line_width=2)
             self.draw_centroid_markers(pts, head_r=8, tail_r=5)
 
-        # Control indicator
-        self.draw_control_indicator()
-
-        # Info panel
+        # Info panel and control indicator
         if self.show_info:
+            self.draw_control_indicator()
             self.draw_maze_info()
 
         # Goal reached message
@@ -920,6 +911,15 @@ class SnakeMazeDemo(SnakeDemo):
             y += 22
 
         self.draw_pause_indicator()
+
+        # "AUTOPILOT" badge
+        if self.autopilot_active:
+            label = self.font.render("AUTOPILOT", True, (50, 120, 50))
+            bg_rect = label.get_rect(topright=(self.config.width - 10, self.config.height - 35))
+            bg = bg_rect.inflate(12, 6)
+            pygame.draw.rect(self.screen, (220, 255, 220), bg)
+            pygame.draw.rect(self.screen, (100, 200, 100), bg, 2)
+            self.screen.blit(label, bg_rect)
 
     def handle_events(self) -> bool:
         """Handle pygame events."""
