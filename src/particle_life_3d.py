@@ -176,9 +176,9 @@ class ParticleLife3D:
         # Center of screen
         self.cx = self.config.width // 2
         self.cy = self.config.height // 2
-        # Pixels per unit (base scale)
+        # Pixels per unit — same formula as 2D: min(screen) / max(sim)
         max_dim = max(self.config.sim_width, self.config.sim_height, self.config.sim_depth)
-        self.ppu = min(self.config.width, self.config.height) / (max_dim * 2.5)
+        self.ppu = min(self.config.width, self.config.height) / max_dim
 
     def setup_display(self, title: str = "3D Particle Life Simulation"):
         """Initialize pygame display."""
