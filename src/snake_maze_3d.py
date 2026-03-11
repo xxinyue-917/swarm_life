@@ -84,20 +84,18 @@ class Wall3D:
 
 # Colors for wall orientations (RGBA — alpha set at draw time)
 ORIENT_FILL = {
-    'x': (100, 150, 220),   # Blue - walls perpendicular to X axis
-    'y': (100, 200, 130),   # Green - walls perpendicular to Y axis
-    'z': (220, 190, 110),   # Amber - floors/ceilings
+    'x': (100, 150, 220),   # Blue - vertical walls
+    'y': (60, 150, 80),     # Darker green - floors/ceilings (Y-perpendicular)
+    'z': (100, 150, 220),   # Blue - vertical walls (same as X)
 }
 ORIENT_BORDER = {
     'x': (60, 100, 170),
-    'y': (60, 150, 80),
-    'z': (170, 140, 60),
+    'y': (30, 100, 50),
+    'z': (60, 100, 170),    # Same as X
 }
 
-FILL_ALPHA = 60        # Translucent fill — see through walls
-BORDER_ALPHA = 180     # More visible edges define structure
-WALL_VISIBILITY_RADIUS = 8.0   # Only draw walls within this distance of snake head
-WALL_FADE_START = 4.0          # Walls start fading beyond this distance
+# Slice mode settings — show walls at the snake's current Y-level
+SLICE_THICKNESS = 0.5   # Only show walls within this Y-range of the snake
 
 
 # =============================================================================
@@ -303,6 +301,7 @@ class SnakeMaze3D(SnakeDemo3D):
         print("  P         Toggle autopilot (A* pathfinding)")
         print("  G         Generate new random maze")
         print("  R         Reset positions")
+
         print("  M         Toggle goal marker")
         print("  SPACE     Pause")
         print("  H/I/V/A   GUI toggles")
@@ -788,78 +787,72 @@ class SnakeMaze3D(SnakeDemo3D):
     # ================================================================
 
     def draw_walls_3d(self):
-        """Draw walls near the snake as translucent panels, depth-sorted.
+        """Draw walls at the snake's current Y-level (horizontal slice).
 
-        Uses proximity-based visibility: walls close to the snake head
-        are drawn clearly, walls farther away fade out, and walls beyond
-        WALL_VISIBILITY_RADIUS are hidden entirely.  This reveals local
-        maze structure without visual clutter from distant walls.
+        Only walls intersecting a horizontal slab around the snake head
+        are shown, giving a clear floor-plan view of the current layer.
+        Vertical walls are drawn solid; floors/ceilings are faint.
         """
         if not self.walls_3d:
             return
 
-        # Snake head position for proximity filtering
         head_mask = self.species == 0
         head_pos = self.positions[head_mask].mean(axis=0)
+        snake_y = head_pos[1]
 
-        # Filter walls by distance to snake head
+        margin = 0.5  # skip boundary floor/ceiling walls
+        sim_h = self.config.sim_height
+
         visible = []
         for wall in self.walls_3d:
-            # Wall center
+            # Skip top/bottom boundary walls (floors/ceilings at edges)
+            if self._wall_orient(wall) == 'y':
+                cy = wall.y + wall.height / 2
+                if cy < margin or cy > sim_h - margin:
+                    continue
+
+            wall_y_min = wall.y
+            wall_y_max = wall.y + wall.height
+            if wall_y_max < snake_y - SLICE_THICKNESS:
+                continue
+            if wall_y_min > snake_y + SLICE_THICKNESS:
+                continue
             cx = wall.x + wall.width / 2
-            cy = wall.y + wall.height / 2
             cz = wall.z + wall.depth / 2
-            dist = np.sqrt((cx - head_pos[0])**2 +
-                           (cy - head_pos[1])**2 +
-                           (cz - head_pos[2])**2)
-            if dist < WALL_VISIBILITY_RADIUS:
-                visible.append((wall, dist))
+            dist_xz = np.sqrt((cx - head_pos[0])**2 +
+                              (cz - head_pos[2])**2)
+            visible.append((wall, dist_xz))
 
         if not visible:
             return
 
         n = len(visible)
-
-        # Batch-project main faces (1 quad per wall)
         all_corners = np.zeros((n * 4, 3))
         for i, (wall, _) in enumerate(visible):
             all_corners[i*4:(i+1)*4] = self._wall_main_face(wall)
 
         sx, sy, dp = self.project_batch(all_corners)
-
-        # Clear overlay
         self._wall_overlay.fill((0, 0, 0, 0))
 
         faces = []
-        for i, (wall, dist) in enumerate(visible):
+        for i, (wall, _) in enumerate(visible):
             pts = [(int(sx[i*4+j]), int(sy[i*4+j])) for j in range(4)]
             avg_d = dp[i*4:(i+1)*4].mean()
             orient = self._wall_orient(wall)
             base = ORIENT_FILL[orient]
             bord = ORIENT_BORDER[orient]
 
-            # Proximity fade: full alpha when close, fading to 0 at radius
-            if dist < WALL_FADE_START:
-                prox = 1.0
+            if orient == 'y':
+                fa, ba = 70, 160
             else:
-                prox = 1.0 - (dist - WALL_FADE_START) / (
-                    WALL_VISIBILITY_RADIUS - WALL_FADE_START)
-                prox = max(0.0, prox)
+                fa, ba = 100, 220
+            faces.append((avg_d, pts, (*base, fa), (*bord, ba)))
 
-            fa = max(10, int(FILL_ALPHA * prox))
-            ba = max(20, int(BORDER_ALPHA * prox))
-
-            fill_rgba = (*base, fa)
-            border_rgba = (*bord, ba)
-            faces.append((avg_d, pts, fill_rgba, border_rgba))
-
-        # Draw back-to-front on overlay
         faces.sort(key=lambda f: -f[0])
         for _, pts, fill, border in faces:
             pygame.draw.polygon(self._wall_overlay, fill, pts)
             pygame.draw.polygon(self._wall_overlay, border, pts, 2)
 
-        # Blit translucent overlay onto screen
         self.screen.blit(self._wall_overlay, (0, 0))
 
     # ================================================================
