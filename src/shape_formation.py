@@ -283,8 +283,8 @@ class MultiSpeciesDemo(ParticleLife):
         # PD state arrays (sized for current n_species, reset on species change)
         self._init_control_state()
 
-        # Initialize particles in side-by-side formation
-        self._initialize_side_by_side()
+        # Initialize particles at random positions
+        self._randomize()
 
         # Seed phi_prev from initial chain (avoids derivative spike on first step)
         self._seed_phi_prev()
@@ -305,7 +305,8 @@ class MultiSpeciesDemo(ParticleLife):
         print("  ↑/↓     Speed up/slow down")
         print("  +/-     Add/remove species")
         print("  C       Toggle CONTROL MODE (PD shape tracking)")
-        print("  R       Reset positions")
+        print("  R       Reset positions (line formation)")
+        print("  S       Randomize particle positions")
         print("  SPACE   Pause")
         print("  H       Hide/show all GUI")
         print("  I       Toggle info panel")
@@ -322,6 +323,14 @@ class MultiSpeciesDemo(ParticleLife):
         print("  WASD    Navigate cells")
         print("  E/X     Increase/decrease value")
         print("=" * 60)
+
+    def _randomize(self):
+        """Place all particles at random positions in the workspace."""
+        m = 0.5
+        sw, sh = self.config.sim_width, self.config.sim_height
+        self.positions[:, 0] = np.random.uniform(m, sw - m, self.n)
+        self.positions[:, 1] = np.random.uniform(m, sh - m, self.n)
+        self.velocities[:] = 0
 
     def _initialize_side_by_side(self):
         """Arrange species in horizontal line formation."""
@@ -799,6 +808,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "C:mode 1-4:pattern [/]:phi0",
                 "K/J:kp  D/F:kd  ←/→:bias",
                 "G:draw shape  V:centroids",
+                "S:randomize  R:reset  M:matrix",
             ]
         else:
             info_lines += [
@@ -809,6 +819,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "C:control mode  G:draw shape",
                 "←/→:turn  ↑/↓:speed",
                 "+/-:species  R:reset  V:centroids",
+                "S:randomize  M:matrix  I:info",
             ]
 
         y = 10
@@ -1005,6 +1016,14 @@ class MultiSpeciesDemo(ParticleLife):
                     self._init_control_state()
                     self._seed_phi_prev()
                     print("Reset positions")
+
+                elif event.key == pygame.K_s and not self.matrix_edit_mode:
+                    self._randomize()
+                    self.turn_input = 0.0
+                    self.head_bias = 0.0
+                    self._init_control_state()
+                    self._seed_phi_prev()
+                    print("Randomized particle positions")
 
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
