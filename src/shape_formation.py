@@ -14,7 +14,7 @@ Two control modes (toggle with C):
 Controls (both modes):
     ←/→: Turn left/right (manual) / heading bias (control)
     ↑/↓: Speed up/slow down
-    +/-: Add/remove species (2-10)
+    +/-: Add/remove species (2-100, step 10 above 10)
     R: Reset positions
     SPACE: Pause/Resume
     I: Toggle info panel
@@ -77,21 +77,30 @@ def generate_rotation_matrix(n_species: int, strength: float) -> np.ndarray:
 
 def generate_position_matrix(n_species: int,
                              self_cohesion: float = 0.6,
-                             cross_attraction: float = 0.1) -> np.ndarray:
+                             cross_attraction: float = 0.1,
+                             particles_per_species: int = 20) -> np.ndarray:
     """
     Generate K_pos matrix for species cohesion.
+
+    Forces are scaled up when particles_per_species is small so that
+    sparse groups still hold together.
 
     Args:
         n_species: Number of species
         self_cohesion: Diagonal values (attraction within species)
         cross_attraction: Off-diagonal values (attraction between neighbors)
+        particles_per_species: Used to scale forces for small groups
     """
+    # Scale factor: baseline assumes 20 pps; fewer particles → stronger forces
+    scale = max(1.0, 20.0 / max(1, particles_per_species))
+    sc = self_cohesion * scale
+    ca = cross_attraction * scale
     K = np.zeros((n_species, n_species))
     for i in range(n_species):
-        K[i, i] = self_cohesion
+        K[i, i] = sc
         for j in range(n_species):
             if abs(i - j) == 1:  # Only neighbors
-                K[i, j] = cross_attraction
+                K[i, j] = ca
     return K
 
 
@@ -229,7 +238,9 @@ class MultiSpeciesDemo(ParticleLife):
         config = Config(
             n_particles=n_particles,
             n_species=n_species,
-            position_matrix=generate_position_matrix(n_species).tolist(),
+            sim_width=20.0,
+            sim_height=20.0,
+            position_matrix=generate_position_matrix(n_species, particles_per_species=n_particles).tolist(),
             orientation_matrix=generate_translation_matrix(n_species, 0.5).tolist(),
         )
 
@@ -261,12 +272,12 @@ class MultiSpeciesDemo(ParticleLife):
         self.control_mode = True        # False = manual blend, True = PD shape control
         self.pattern_index = 0          # 0=STRAIGHT, 1=U, 2=M, 3=HUG
         self.phi0 = 0.8                 # Target curvature magnitude (radians, ~46° per joint)
-        self.kp = 0.5                   # Proportional gain
-        self.kd = 2.0                   # Derivative gain (on raw Δφ, NOT divided by dt)
-        self.u_max = 0.15               # Control output clamp
-        self.e_max = np.pi / 6          # Max error magnitude (~30°, gentle corrections only)
-        self.speed_scale = 0.3          # Multiplier before writing to K_rot
-        self.ctrl_alpha = 0.2           # Output smoothing (higher = more responsive)
+        self.kp = 1.2                   # Proportional gain
+        self.kd = 4.0                   # Derivative gain (higher = more damping)
+        self.u_max = 0.8                # Control output clamp
+        self.speed_scale = 1.0          # Multiplier before writing to K_rot
+        self.e_max = np.pi / 3          # Max error magnitude (~60°)
+        self.ctrl_alpha = 0.15          # Output smoothing (lower = smoother)
         self.head_bias = 0.0            # Arrow-key heading offset added to first joint target
 
         # Mouse-drawn custom shape state
@@ -303,7 +314,7 @@ class MultiSpeciesDemo(ParticleLife):
         print("Controls:")
         print("  ←/→     Turn (manual) / heading bias (control)")
         print("  ↑/↓     Speed up/slow down")
-        print("  +/-     Add/remove species")
+        print("  +/-     Add/remove species (step 10 above 10)")
         print("  C       Toggle CONTROL MODE (PD shape tracking)")
         print("  R       Reset positions (line formation)")
         print("  S       Randomize particle positions")
@@ -333,27 +344,27 @@ class MultiSpeciesDemo(ParticleLife):
         self.velocities[:] = 0
 
     def _initialize_side_by_side(self):
-        """Arrange species in horizontal line formation."""
-        center_x = self.config.sim_width / 2
-        center_y = self.config.sim_height / 2
+        """Arrange species in horizontal line formation, always fitting the workspace."""
+        sw, sh = self.config.sim_width, self.config.sim_height
+        center_x = sw / 2
+        center_y = sh / 2
+        margin = 0.5
 
-        # Calculate total width of formation
-        total_width = (self.n_species - 1) * self.group_spacing
-        start_x = center_x - total_width / 2
+        # Always fit: spacing = available width / (n_species - 1)
+        available = sw - 2 * margin
+        spacing = available / max(1, self.n_species - 1)
+        start_x = margin
 
-        particles_per_species = self.n // self.n_species
+        particles_per_species = max(1, self.n // self.n_species)
+        # Scatter radius scales with spacing so groups don't overlap
+        scatter = min(0.2, spacing * 0.3)
 
         for i in range(self.n):
             species_id = min(i // particles_per_species, self.n_species - 1)
             self.species[i] = species_id
 
-            # Group center for this species (meters)
-            group_center_x = start_x + species_id * self.group_spacing
-            group_center_y = center_y
-
-            # Random offset within group (meters)
-            self.positions[i, 0] = group_center_x + self.rng.uniform(-0.2, 0.2)
-            self.positions[i, 1] = group_center_y + self.rng.uniform(-0.2, 0.2)
+            self.positions[i, 0] = start_x + species_id * spacing + self.rng.uniform(-scatter, scatter)
+            self.positions[i, 1] = center_y + self.rng.uniform(-scatter, scatter)
 
             # Initial velocity (slight forward motion)
             self.velocities[i] = np.array([0.0, -0.1])
@@ -612,12 +623,10 @@ class MultiSpeciesDemo(ParticleLife):
         and joint angle arcs — all fading out over shape_vis_duration seconds.
         """
         vis = self.shape_vis
-        if vis is None or self.shape_vis_timer <= 0:
+        if vis is None:
             return
 
-        # Fade alpha: full opacity for first half, then linear fade
-        t_frac = self.shape_vis_timer / self.shape_vis_duration
-        alpha = int(255 * min(1.0, t_frac * 2))
+        alpha = 255
 
         smoothed = vis['smoothed']
         sampled = vis['sampled']
@@ -705,9 +714,7 @@ class MultiSpeciesDemo(ParticleLife):
         if self.paused:
             return
 
-        # Tick shape visualization timer
-        if self.shape_vis_timer > 0:
-            self.shape_vis_timer -= self.config.dt
+        # (shape_vis persists until overwritten by a new drawing)
 
         if self.control_mode:
             # In control mode: head_bias decays, PD controller updates K_rot
@@ -829,8 +836,9 @@ class MultiSpeciesDemo(ParticleLife):
                 self.screen.blit(text, (10, y))
             y += 22
 
-        # Draw K_rot matrix visualization
-        self.draw_matrix_viz()
+        # Draw K_rot matrix visualization (skip when too large)
+        if self.n_species <= 10:
+            self.draw_matrix_viz()
 
         self.draw_pause_indicator()
 
@@ -923,7 +931,7 @@ class MultiSpeciesDemo(ParticleLife):
 
     def change_species_count(self, new_count: int):
         """Change the number of species and reinitialize."""
-        new_count = max(2, min(10, new_count))
+        new_count = max(2, min(100, new_count))
         if new_count == self.n_species:
             return
 
@@ -932,11 +940,25 @@ class MultiSpeciesDemo(ParticleLife):
         # Update config
         self.config.n_species = new_count
         self.n_species = new_count
-        self.n = self.config.n_particles * self.n_species
+        if new_count > 10:
+            self.n = 200
+        else:
+            self.n = self.config.n_particles * self.n_species
 
-        # Regenerate matrices
-        self.matrix = generate_position_matrix(new_count)
+        # Regenerate matrices (scale forces for particles per species)
+        particles_per_species = self.n // new_count
+        self.matrix = generate_position_matrix(new_count, particles_per_species=particles_per_species)
         self.alignment_matrix = generate_translation_matrix(new_count, self.base_k_rot)
+
+        # Scale PD controller for species count — fewer particles per species means
+        # fewer particle pairs, so tangential force per edge is much weaker.
+        # Compensate by boosting PD output limits so K_rot values are larger.
+        # Reset PD params to defaults (no scaling)
+        self.kp = 1.2
+        self.kd = 4.0
+        self.u_max = 0.8
+        self.speed_scale = 1.0
+        self.e_max = np.pi / 3
 
         # Update base matrices
         self._update_base_matrices()
@@ -965,7 +987,7 @@ class MultiSpeciesDemo(ParticleLife):
         if self.pattern_index == 4:
             self.pattern_index = 0
 
-        print(f"Species: {self.n_species} x {self.config.n_particles} = {self.n} particles")
+        print(f"Species: {self.n_species}  Particles: {self.n}")
 
     def _adjust_matrix_value(self, delta: float):
         """Adjust the selected matrix cell value."""
@@ -1044,10 +1066,12 @@ class MultiSpeciesDemo(ParticleLife):
 
                 # Species count adjustment (works in all modes except matrix edit)
                 elif not self.matrix_edit_mode and (event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS):
-                    self.change_species_count(self.n_species + 1)
+                    step = 10 if self.n_species >= 10 else 1
+                    self.change_species_count(self.n_species + step)
 
                 elif not self.matrix_edit_mode and event.key == pygame.K_MINUS:
-                    self.change_species_count(self.n_species - 1)
+                    step = 10 if self.n_species > 10 else 1
+                    self.change_species_count(self.n_species - step)
 
                 # Toggle control mode
                 elif event.key == pygame.K_c:
