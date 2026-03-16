@@ -273,11 +273,13 @@ class MultiSpeciesDemo(ParticleLife):
         self.pattern_index = 0          # 0=STRAIGHT, 1=U, 2=M, 3=HUG
         self.phi0 = 0.8                 # Target curvature magnitude (radians, ~46° per joint)
         self.kp = 1.2                   # Proportional gain
+        self.ki = 0.3                   # Integral gain (eliminates steady-state error)
         self.kd = 4.0                   # Derivative gain (higher = more damping)
         self.u_max = 0.8                # Control output clamp
         self.speed_scale = 1.0          # Multiplier before writing to K_rot
         self.e_max = np.pi / 3          # Max error magnitude (~60°)
         self.ctrl_alpha = 0.15          # Output smoothing (lower = smoother)
+        self.i_max = 0.5                # Anti-windup clamp for integral term
         self.head_bias = 0.0            # Arrow-key heading offset added to first joint target
 
         # Mouse-drawn custom shape state
@@ -380,6 +382,7 @@ class MultiSpeciesDemo(ParticleLife):
         n_edges = max(0, S - 1)    # number of edges (u_edge has length S-1)
         self.phi_prev = np.zeros(n_joints)
         self.phi_filtered = np.zeros(n_joints)  # low-pass filtered phi for derivative
+        self.error_integral = np.zeros(n_joints)  # accumulated error for I term
         self.u_edge_prev = np.zeros(n_edges)
         self.ctrl_mean_error = 0.0  # diagnostic: mean |error| across joints
 
@@ -536,8 +539,12 @@ class MultiSpeciesDemo(ParticleLife):
         # Absorbing dt into kd avoids 1/dt noise amplification.
         phi_dot = wrap_to_pi(phi_filt - self.phi_filtered)  # (S-2,)
 
-        # PD law: u = kp * e - kd * phi_dot
-        u_joint = self.kp * error - self.kd * phi_dot  # (S-2,)
+        # Integral: accumulate error with anti-windup clamp
+        self.error_integral += error
+        self.error_integral = np.clip(self.error_integral, -self.i_max, self.i_max)
+
+        # PID law: u = kp * e + ki * integral - kd * phi_dot
+        u_joint = self.kp * error + self.ki * self.error_integral - self.kd * phi_dot
 
         # Clamp
         u_joint = np.clip(u_joint, -self.u_max, self.u_max)
@@ -809,7 +816,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "CONTROL MODE ON",
                 f"Pattern: {PATTERN_NAMES[self.pattern_index]}",
                 f"phi0: {self.phi0:.2f}  bias: {self.head_bias:+.2f}",
-                f"kp: {self.kp:.1f}  kd: {self.kd:.1f}  u_max: {self.u_max:.1f}",
+                f"kp: {self.kp:.1f}  ki: {self.ki:.1f}  kd: {self.kd:.1f}  u_max: {self.u_max:.1f}",
                 f"mean|e|: {self.ctrl_mean_error:.3f}",
                 "",
                 "C:mode 1-4:pattern [/]:phi0",
@@ -953,12 +960,14 @@ class MultiSpeciesDemo(ParticleLife):
         # Scale PD controller for species count — fewer particles per species means
         # fewer particle pairs, so tangential force per edge is much weaker.
         # Compensate by boosting PD output limits so K_rot values are larger.
-        # Reset PD params to defaults (no scaling)
+        # Reset PID params to defaults (no scaling)
         self.kp = 1.2
+        self.ki = 0.3
         self.kd = 4.0
         self.u_max = 0.8
         self.speed_scale = 1.0
         self.e_max = np.pi / 3
+        self.i_max = 0.5
 
         # Update base matrices
         self._update_base_matrices()
