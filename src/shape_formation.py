@@ -143,6 +143,120 @@ def compute_joint_angles(theta):
     return wrap_to_pi(np.diff(theta))
 
 
+def point_in_polygon(px, py, polygon):
+    """Ray-casting point-in-polygon test. polygon is (N,2) array, closed or open."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _polygon_area(polygon):
+    """Compute area of a polygon using the shoelace formula."""
+    poly = np.asarray(polygon)
+    n = len(poly)
+    area = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        area += poly[i, 0] * poly[j, 1]
+        area -= poly[j, 0] * poly[i, 1]
+    return abs(area) / 2.0
+
+
+def _scanline_intersections(polygon, y):
+    """Find sorted x-coordinates where a horizontal line at y crosses the polygon edges.
+
+    Uses proper ray–edge intersection. Returns sorted list of x values.
+    Pairs of consecutive values define inside intervals: [x0,x1], [x2,x3], ...
+    """
+    xs = []
+    n = len(polygon)
+    for i in range(n):
+        j = (i + 1) % n
+        yi, yj = polygon[i][1], polygon[j][1]
+        xi, xj = polygon[i][0], polygon[j][0]
+        # Skip horizontal edges or edges that don't straddle y
+        if (yi < y) == (yj < y):
+            continue
+        # Compute x at intersection
+        t = (y - yi) / (yj - yi)
+        x = xi + t * (xj - xi)
+        xs.append(x)
+    xs.sort()
+    return xs
+
+
+def generate_fill_path(polygon, row_spacing=None, n_species=20):
+    """Generate a serpentine scan-line path that fills a closed polygon.
+
+    Handles concave and multi-region shapes correctly by computing exact
+    edge intersections per scan line, producing paired intervals.
+
+    Args:
+        polygon: (N, 2) array of contour vertices (sim coordinates)
+        row_spacing: vertical distance between scan lines (auto if None)
+        n_species: used for auto row_spacing
+
+    Returns:
+        path: (M, 2) array of path vertices forming a continuous zigzag
+    """
+    poly = np.asarray(polygon)
+    y_min, y_max = poly[:, 1].min(), poly[:, 1].max()
+
+    if row_spacing is None:
+        # Area-based: path_length ≈ area / row_spacing
+        # We want path_length ≈ n_species * desired_gap
+        area = _polygon_area(poly)
+        desired_gap = 0.4
+        row_spacing = area / max(1, n_species * desired_gap)
+        # Clamp to reasonable range
+        height = y_max - y_min
+        row_spacing = np.clip(row_spacing, height / 100, height / 3)
+
+    margin = row_spacing * 0.1
+    path = []
+    going_right = True
+    y = y_min + margin
+
+    while y <= y_max - margin:
+        xs = _scanline_intersections(poly, y)
+        # xs comes in pairs: [enter, exit, enter, exit, ...]
+        # Build intervals
+        intervals = []
+        for k in range(0, len(xs) - 1, 2):
+            intervals.append((xs[k], xs[k + 1]))
+
+        if not intervals:
+            y += row_spacing
+            continue
+
+        if not going_right:
+            intervals = intervals[::-1]
+
+        for x_lo, x_hi in intervals:
+            if going_right:
+                path.append([x_lo, y])
+                path.append([x_hi, y])
+            else:
+                path.append([x_hi, y])
+                path.append([x_lo, y])
+
+        going_right = not going_right
+        y += row_spacing
+
+    if len(path) < 2:
+        cx, cy = poly.mean(axis=0)
+        return np.array([[cx - 0.1, cy], [cx + 0.1, cy]])
+
+    return np.array(path)
+
+
 def sample_points_uniformly(points, n_samples):
     """
     Uniformly sample n_samples points along a polyline by arc length.
@@ -284,6 +398,7 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Mouse-drawn custom shape state
         self.drawing_mode = False
+        self.fill_draw_mode = False
         self.mouse_drawing = False
         self.drawing_points = []
         self.custom_target_angles = None
@@ -471,6 +586,77 @@ class MultiSpeciesDemo(ParticleLife):
         self.head_bias = 0.0
         print(f"Custom shape applied: {len(phi)} joint angles extracted")
 
+    def _process_drawn_contour_fill(self):
+        """Convert drawn closed contour into a serpentine fill path, then extract joint angles.
+
+        The contour is rescaled to an ideal size for the current species count
+        so the fill density is always appropriate. Only the angles are used —
+        they are scale-invariant.
+        """
+        if len(self.drawing_points) < 10:
+            print("Need more points to define a closed contour")
+            return
+
+        # Smooth raw mouse input
+        raw = np.array(self.drawing_points, dtype=float)
+        smoothed = self._smooth_polyline(raw)
+
+        # Screen → sim coordinates
+        sim_contour = np.array([self.from_screen(p) for p in smoothed])
+
+        # Close the contour
+        if np.linalg.norm(sim_contour[0] - sim_contour[-1]) > 0.01:
+            sim_contour = np.vstack([sim_contour, sim_contour[:1]])
+
+        # --- Rescale contour to ideal size for n_species ---
+        # Target: each species gets ~0.5m along the path, rows spaced 0.5m apart
+        # target_area ≈ n_species * gap * row_spacing
+        gap = 0.5
+        row_sp = 0.5
+        target_area = self.n_species * gap * row_sp
+        current_area = max(1e-6, _polygon_area(sim_contour))
+        scale = np.sqrt(target_area / current_area)
+
+        centroid = sim_contour.mean(axis=0)
+        scaled_contour = (sim_contour - centroid) * scale + centroid
+
+        # Generate serpentine fill path at fixed row spacing
+        fill_path = generate_fill_path(scaled_contour, row_spacing=row_sp)
+
+        # Uniformly sample n_species points along fill path
+        sampled = sample_points_uniformly(fill_path, self.n_species)
+
+        # Extract joint angles (scale-invariant)
+        theta = compute_segment_angles(sampled)
+        phi = compute_joint_angles(theta)
+
+        # --- Visualization: map fill path back to original drawn size ---
+        inv_scale = 1.0 / scale
+        fill_orig = (fill_path - centroid) * inv_scale + centroid
+        sampled_orig = (sampled - centroid) * inv_scale + centroid
+
+        fill_screen = [self.to_screen(p) for p in fill_orig]
+        contour_screen = [self.to_screen(p) for p in sim_contour]
+        sampled_screen = [self.to_screen(p) for p in sampled_orig]
+        self.shape_vis = {
+            'smoothed': fill_screen,
+            'sampled': sampled_screen,
+            'theta': theta.copy(),
+            'phi': phi.copy(),
+            'raw_count': len(raw),
+            'smoothed_count': len(fill_screen),
+            'contour': contour_screen,
+        }
+
+        # Apply as custom target
+        self.custom_target_angles = phi
+        self.pattern_index = 4  # CUSTOM
+        self.control_mode = True
+        self._init_control_state()
+        self._seed_phi_prev()
+        self.head_bias = 0.0
+        print(f"Fill shape applied: scale={scale:.2f}x, {len(fill_path)} path pts → {len(phi)} joint angles")
+
     def _get_target_profile(self):
         """Return the desired joint-angle array phi_star (length S-2)."""
         n_joints = max(0, self.n_species - 2)
@@ -640,10 +826,14 @@ class MultiSpeciesDemo(ParticleLife):
         theta = vis['theta']
         phi = vis['phi']
 
-        # --- 1. Smoothed polyline (template curve) ---
+        # --- 0. Contour outline (if fill mode was used) ---
+        contour = vis.get('contour')
+        if contour and len(contour) >= 3:
+            cpts = [(int(p[0]), int(p[1])) for p in contour]
+            pygame.draw.lines(self.screen, (200, 150, 100), True, cpts, 2)
+
+        # --- 1. Smoothed polyline / fill path ---
         if len(smoothed) >= 2:
-            curve_color = (180, 180, 220, alpha)
-            # Draw as dotted: every other segment
             pts = [(int(p[0]), int(p[1])) for p in smoothed]
             for k in range(0, len(pts) - 1, 2):
                 pygame.draw.line(self.screen, (180, 180, 220), pts[k], pts[k + 1], 1)
@@ -821,7 +1011,7 @@ class MultiSpeciesDemo(ParticleLife):
                 "",
                 "C:mode 1-4:pattern [/]:phi0",
                 "K/J:kp  D/F:kd  ←/→:bias",
-                "G:draw shape  V:centroids",
+                "G:draw  F:fill  V:centroids",
                 "S:randomize  R:reset  M:matrix",
             ]
         else:
@@ -830,7 +1020,7 @@ class MultiSpeciesDemo(ParticleLife):
                 f"Turn: {self.turn_input:+.2f}",
                 f"Speed: {self.speed_input:.2f}",
                 "",
-                "C:control mode  G:draw shape",
+                "C:control mode  G:draw  F:fill",
                 "←/→:turn  ↑/↓:speed",
                 "+/-:species  R:reset  V:centroids",
                 "S:randomize  M:matrix  I:info",
@@ -1030,7 +1220,10 @@ class MultiSpeciesDemo(ParticleLife):
             elif event.type == pygame.MOUSEBUTTONUP:
                 if self.drawing_mode and event.button == 1:
                     self.mouse_drawing = False
-                    self._process_drawn_shape()
+                    if getattr(self, 'fill_draw_mode', False):
+                        self._process_drawn_contour_fill()
+                    else:
+                        self._process_drawn_shape()
                     self.drawing_mode = False
 
             elif event.type == pygame.KEYDOWN:
@@ -1070,8 +1263,15 @@ class MultiSpeciesDemo(ParticleLife):
 
                 elif event.key == pygame.K_g:
                     self.drawing_mode = True
+                    self.fill_draw_mode = False
                     self.drawing_points = []
-                    print("Draw mode: drag mouse to draw shape")
+                    print("Draw mode: drag mouse to draw shape (open path)")
+
+                elif event.key == pygame.K_f and not self.matrix_edit_mode:
+                    self.drawing_mode = True
+                    self.fill_draw_mode = True
+                    self.drawing_points = []
+                    print("Fill mode: drag mouse to draw closed contour → serpentine fill")
 
                 # Species count adjustment (works in all modes except matrix edit)
                 elif not self.matrix_edit_mode and (event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS):
