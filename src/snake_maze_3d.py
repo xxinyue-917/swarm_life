@@ -334,10 +334,20 @@ class SnakeMaze3D(SnakeDemo3D):
         sx, sy, sz = self.start_position
         particles_per_species = self.n // self.n_species
 
+        # Fit chain within the first cell — compute max spacing that stays inside
+        cell_w = self.config.sim_width / 3
+        margin = 0.3
+        max_chain_len = cell_w - 2 * margin  # usable width within cell
+        spacing = min(self.group_spacing * 0.4,
+                      max_chain_len / max(1, self.n_species - 1))
+
         for i in range(self.n):
             species_id = min(i // particles_per_species, self.n_species - 1)
             self.species[i] = species_id
-            group_x = sx + species_id * self.group_spacing * 0.4
+            # Center the chain within the cell
+            chain_len = (self.n_species - 1) * spacing
+            start_x = sx - chain_len / 2
+            group_x = start_x + species_id * spacing
             self.positions[i, 0] = group_x + self.rng.uniform(-0.08, 0.08)
             self.positions[i, 1] = sy + self.rng.uniform(-0.08, 0.08)
             self.positions[i, 2] = sz + self.rng.uniform(-0.08, 0.08)
