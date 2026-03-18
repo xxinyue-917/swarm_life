@@ -250,7 +250,7 @@ class SnakeMaze3D(SnakeDemo3D):
 
         self.group_spacing = 0.8
         self.hide_gui = False
-        self.show_centroids = True
+        self.show_centroids = False
 
         # Maze state
         self.walls_3d = []
@@ -258,7 +258,8 @@ class SnakeMaze3D(SnakeDemo3D):
 
         # Goal
         self.goal_radius = 0.6
-        self.show_goal = True
+        self.show_goal = False
+        self.show_info = False
         self.goal_reached = False
         self.start_position = np.array([1.0, 1.0, sim_d / 2])
         self.goal_position = np.array([sim_w - 1.0, sim_h - 1.0, sim_d / 2])
@@ -282,9 +283,31 @@ class SnakeMaze3D(SnakeDemo3D):
         self._wall_overlay = pygame.Surface(
             (config.width, config.height), pygame.SRCALPHA)
 
+        # Intro animation state
+        self.intro_active = True
+        self.intro_time = 0.0
+        self.intro_phase = 'overview'  # 'overview' | 'layer' | 'zoom'
+        self.intro_slice_y = None      # used for layer slice filtering
+        self.intro_max_y = None        # None = show all
+        # Phase durations
+        self.intro_overview_dur = 4.0   # full maze rotation
+        self.intro_layer_dur = 2.5      # each individual layer
+        self.intro_zoom_dur = 2.0       # final zoom to start
+        n_layers = 3
+        self.intro_total_dur = (self.intro_overview_dur
+                                + n_layers * self.intro_layer_dur
+                                + self.intro_zoom_dur)
+
         # Load maze and place snake
         self.load_maze()
         self._initialize_at_start()
+
+        # Set intro camera: zoomed out, looking down at an angle
+        self.cam_yaw = 0.0
+        self.cam_pitch = -np.pi / 4
+        self.cam_zoom = 0.6
+        self.cam_pan = np.array([0.0, 0.0])
+        self.paused = True  # pause sim during intro
 
         pygame.display.set_caption("3D Snake Maze \u2014 Navigate to Goal")
 
@@ -354,6 +377,93 @@ class SnakeMaze3D(SnakeDemo3D):
             self.velocities[i] = [0.0, 0.0, 0.0]
 
         self.goal_reached = False
+
+    # ================================================================
+    # Intro animation
+    # ================================================================
+
+    def _smooth_step(self, t):
+        """Smooth interpolation: 0→1 with ease in/out."""
+        t = np.clip(t, 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    def update_intro(self, dt):
+        """Update the intro camera animation. Returns True while active.
+
+        Phases:
+        1. Overview — rotate showing all walls
+        2. Layer 0, 1, 2 — slice view of each Y-layer individually
+        3. Zoom — smooth transition to gameplay camera
+        """
+        if not self.intro_active:
+            return False
+
+        self.intro_time += dt
+        cell_h = self.config.sim_height / 3
+        t_ov = self.intro_overview_dur
+        t_ly = self.intro_layer_dur
+        n_layers = 3
+
+        if self.intro_time < t_ov:
+            # Phase 1: Overview — rotate showing all walls
+            self.intro_phase = 'overview'
+            self.intro_max_y = None  # show all
+            t = self.intro_time / t_ov
+            self.cam_yaw = np.pi / 6 + t * np.pi * 1.5
+            self.cam_pitch = -np.pi / 4
+            self.cam_zoom = 0.6
+            self.cam_pan = np.array([0.0, 0.0])
+
+        elif self.intro_time < t_ov + n_layers * t_ly:
+            # Phase 2: Show each layer individually (sliced, one at a time)
+            elapsed = self.intro_time - t_ov
+            layer_idx = min(int(elapsed / t_ly), n_layers - 1)
+            layer_t = (elapsed - layer_idx * t_ly) / t_ly
+
+            self.intro_phase = 'layer'
+            # Slice to show only this layer
+            self.intro_slice_y = cell_h * (layer_idx + 0.5)
+
+            self.cam_yaw = np.pi / 6 + layer_t * np.pi * 2 / 3
+            self.cam_pitch = -np.pi / 4
+            self.cam_zoom = 0.6
+            # Pan to center on this layer
+            dy = cell_h * (layer_idx + 0.5) - self.config.sim_height / 2
+            pan_y = dy * np.cos(self.cam_pitch) * self.ppu * self.cam_zoom
+            self.cam_pan = np.array([0.0, pan_y])
+
+        elif self.intro_time < self.intro_total_dur:
+            # Phase 3: Zoom in toward start position
+            self.intro_phase = 'zoom'
+            self.intro_slice_y = None
+            self.intro_max_y = None
+            elapsed = self.intro_time - t_ov - n_layers * t_ly
+            t = elapsed / self.intro_zoom_dur
+            s = self._smooth_step(t)
+
+            prev_yaw = np.pi / 6 + np.pi * 2 / 3
+            self.cam_yaw = prev_yaw * (1 - s) + np.pi / 6 * s
+            self.cam_pitch = -np.pi / 4  # same as overview
+            self.cam_zoom = 0.6 + (0.7 - 0.6) * s
+            self.cam_pan = np.array([0.0, 0.0])
+
+        else:
+            # Done — hand control to player
+            self.intro_active = False
+            self.intro_phase = None
+            self.intro_slice_y = None
+            self.intro_max_y = None
+            self.paused = False
+            self.cam_yaw = np.pi / 6
+            self.cam_pitch = -np.pi / 4
+            self.cam_zoom = 0.7
+            self.cam_pan = np.array([0.0, 0.0])
+            # Auto-start path planning
+            self.autopilot_active = True
+            self.plan_autopilot_path()
+            print("Go! Autopilot engaged.")
+
+        return True
 
     # ================================================================
     # Wall collision
@@ -724,6 +834,18 @@ class SnakeMaze3D(SnakeDemo3D):
         if self.show_goal:
             self.draw_start_3d()
             self.draw_goal_3d()
+        elif self.intro_active:
+            # During intro, show start/goal markers contextually
+            cell_h = self.config.sim_height / 3
+            if self.intro_phase == 'overview' or self.intro_phase == 'zoom':
+                self.draw_start_3d()
+                self.draw_goal_3d()
+            elif self.intro_phase == 'layer' and self.intro_slice_y is not None:
+                layer_idx = round(self.intro_slice_y / cell_h - 0.5)
+                if layer_idx == 0:
+                    self.draw_start_3d()
+                elif layer_idx == 2:
+                    self.draw_goal_3d()
 
         self.draw_walls_3d()
 
@@ -757,7 +879,7 @@ class SnakeMaze3D(SnakeDemo3D):
         if self.goal_reached:
             self.draw_goal_message()
 
-        if self.paused:
+        if self.paused and not self.intro_active:
             text = self.font.render("PAUSED", True, (200, 50, 50))
             self.screen.blit(text, text.get_rect(
                 center=(self.config.width // 2, 30)))
@@ -815,18 +937,34 @@ class SnakeMaze3D(SnakeDemo3D):
 
         visible = []
         for wall in self.walls_3d:
-            # Skip top/bottom boundary walls (floors/ceilings at edges)
-            if self._wall_orient(wall) == 'y':
-                cy = wall.y + wall.height / 2
-                if cy < margin or cy > sim_h - margin:
+            if self.intro_active and self.intro_slice_y is not None:
+                # Intro layer phase: show walls whose CENTER falls within
+                # this layer's Y range. Using center avoids catching tall
+                # vertical walls from adjacent rows whose edges overlap.
+                cell_h = sim_h / 3
+                layer_idx = round(self.intro_slice_y / cell_h - 0.5)
+                layer_bot = layer_idx * cell_h - 0.1       # include floor
+                layer_top = (layer_idx + 1) * cell_h - 0.1 # exclude ceiling
+                wall_center_y = wall.y + wall.height / 2
+                if wall_center_y < layer_bot or wall_center_y > layer_top:
                     continue
+            elif self.intro_active:
+                # Overview or zoom phase — show all walls
+                pass
+            else:
+                # Gameplay: slice around snake Y
+                # Skip top/bottom boundary walls
+                if self._wall_orient(wall) == 'y':
+                    cy = wall.y + wall.height / 2
+                    if cy < margin or cy > sim_h - margin:
+                        continue
 
-            wall_y_min = wall.y
-            wall_y_max = wall.y + wall.height
-            if wall_y_max < snake_y - SLICE_THICKNESS:
-                continue
-            if wall_y_min > snake_y + SLICE_THICKNESS:
-                continue
+                wall_y_min = wall.y
+                wall_y_max = wall.y + wall.height
+                if wall_y_max < snake_y - SLICE_THICKNESS:
+                    continue
+                if wall_y_min > snake_y + SLICE_THICKNESS:
+                    continue
             cx = wall.x + wall.width / 2
             cz = wall.z + wall.depth / 2
             dist_xz = np.sqrt((cx - head_pos[0])**2 +
@@ -970,6 +1108,23 @@ class SnakeMaze3D(SnakeDemo3D):
             if event.type == pygame.QUIT:
                 return False
 
+            # Skip intro on any key/click
+            if self.intro_active:
+                if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                    self.intro_active = False
+                    self.intro_phase = None
+                    self.intro_slice_y = None
+                    self.intro_max_y = None
+                    self.paused = False
+                    self.cam_yaw = np.pi / 6
+                    self.cam_pitch = -np.pi / 4
+                    self.cam_zoom = 0.7
+                    self.cam_pan = np.array([0.0, 0.0])
+                    self.autopilot_active = True
+                    self.plan_autopilot_path()
+                    print("Go! Autopilot engaged.")
+                continue
+
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     self.mouse_dragging = True
@@ -1089,11 +1244,32 @@ class SnakeMaze3D(SnakeDemo3D):
     def run(self):
         running = True
         while running:
+            dt = self.clock.tick(60) / 1000.0
             running = self.handle_events()
+            self.update_intro(dt)
             self.step()
             self.draw()
+
+            # Draw intro text overlay
+            if self.intro_active:
+                phase = self.intro_phase or ''
+                if phase == 'overview':
+                    msg = "Maze Overview"
+                elif phase == 'layer':
+                    elapsed = self.intro_time - self.intro_overview_dur
+                    layer_idx = min(int(elapsed / self.intro_layer_dur), 2)
+                    labels = ['Bottom', 'Middle', 'Top']
+                    msg = f"Layer {layer_idx + 1} / 3  —  {labels[layer_idx]}"
+                elif phase == 'zoom':
+                    msg = "Ready..."
+                else:
+                    msg = ""
+                if msg:
+                    text = self.font.render(msg, True, (80, 80, 80))
+                    rect = text.get_rect(center=(self.config.width // 2, 30))
+                    self.screen.blit(text, rect)
+
             pygame.display.flip()
-            self.clock.tick(60)
         pygame.quit()
 
 
