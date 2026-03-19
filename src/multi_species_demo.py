@@ -3,17 +3,15 @@
 Multi-Species Manual Control Demo
 
 Demonstrates manual control of N species (2-10) arranged side-by-side.
-Arrow keys control swarm movement:
-- Left/Right: Turn the swarm
-- Up/Down: Adjust speed
+A PD heading controller steers the swarm toward a target direction.
 
-The K_rot matrix is dynamically updated based on input:
+The K_rot matrix is dynamically updated:
 - Translation mode: Adjacent species have opposite-sign K_rot entries
 - Rotation mode: All species have same-sign K_rot entries
-- Blending: Arrow keys smoothly blend between modes
+- PD controller blends between modes to track target heading
 
 Controls:
-    ←/→: Turn left/right
+    ←/→: Rotate target heading left/right
     ↑/↓: Speed up/slow down
     +/-: Add/remove species (2-10)
     R: Reset positions
@@ -105,12 +103,17 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Control state
         self.turn_input = 0.0       # -1 (full left) to +1 (full right)
-        self.speed_input = 1.0      # 0 (stop) to 1 (full speed)
+        self.speed_input = 0.4      # 0 (stop) to 1 (full speed)
         self.base_k_rot = 0.8      # Base rotation matrix strength
 
-        # Input smoothing
-        self.turn_decay = 0.95      # How quickly turn input returns to 0
-        self.speed_decay = 0.98     # How quickly speed input stabilizes
+        # PD heading controller
+        self.target_heading = -np.pi / 2  # Target direction (radians, 0=right, -pi/2=up)
+        self.current_heading = -np.pi / 2  # Measured from centroid velocity
+        self.prev_heading_error = 0.0
+        self.heading_kp = 0.5       # Proportional gain (gentle correction)
+        self.heading_kd = 0.4       # Derivative gain (damp oscillation)
+        self.heading_turn_rate = 0.03  # Radians per frame when key held
+        self.heading_deadzone = 0.05  # Ignore errors smaller than this (radians, ~3°)
 
         # Formation parameters
         self.group_spacing = 1.0    # Meters between species group centers
@@ -139,7 +142,7 @@ class MultiSpeciesDemo(ParticleLife):
         print(f"Species: {self.n_species}  Particles: {self.n}")
         print("")
         print("Controls:")
-        print("  ←/→     Turn left/right")
+        print("  ←/→     Rotate target heading")
         print("  ↑/↓     Speed up/slow down")
         print("  +/-     Add/remove species")
         print("  R       Reset positions")
@@ -222,15 +225,47 @@ class MultiSpeciesDemo(ParticleLife):
             for j in range(self.n_species):
                 self.alignment_matrix[i, j] = np.clip(K_blended[i, j], -1.0, 1.0)
 
+    def _measure_heading(self):
+        """Measure heading from chain axis orientation.
+
+        The swarm moves perpendicular to the chain (species 0 → species N-1).
+        This is stable because it depends on cluster positions, not velocities.
+        """
+        head_pos = self.positions[self.species == 0].mean(axis=0)
+        tail_pos = self.positions[self.species == self.n_species - 1].mean(axis=0)
+        chain_vec = tail_pos - head_pos
+        chain_angle = np.arctan2(chain_vec[1], chain_vec[0])
+        # Motion is perpendicular to chain axis
+        self.current_heading = self._wrap_angle(chain_angle - np.pi / 2)
+
+    def _wrap_angle(self, angle):
+        """Wrap angle to [-pi, pi]."""
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
+    def _pd_heading_control(self):
+        """PD controller: heading error -> turn_input."""
+        error = self._wrap_angle(self.target_heading - self.current_heading)
+
+        # Dead zone: ignore tiny errors to prevent jitter
+        if abs(error) < self.heading_deadzone:
+            error = 0.0
+
+        d_error = self._wrap_angle(error - self.prev_heading_error)
+        self.prev_heading_error = error
+
+        output = self.heading_kp * error + self.heading_kd * d_error
+        self.turn_input = np.clip(output, -1.0, 1.0)
+
     def step(self):
-        """Perform one simulation step with control updates."""
+        """Perform one simulation step with PD heading control."""
         if self.paused:
             return
 
-        # Apply input decay (return to neutral over time)
-        self.turn_input *= self.turn_decay
-        if abs(self.turn_input) < 0.01:
-            self.turn_input = 0.0
+        # Measure current heading from swarm velocity
+        self._measure_heading()
+
+        # PD controller drives turn_input
+        self._pd_heading_control()
 
         # Update matrices based on current input
         self.update_matrices_from_input()
@@ -259,50 +294,63 @@ class MultiSpeciesDemo(ParticleLife):
             self.draw_info_panel()
 
     def draw_control_indicator(self):
-        """Draw visual indicator for current turn/speed input."""
-        # Position in bottom center
+        """Draw heading compass and speed indicator."""
         cx = self.config.width // 2
-        cy = self.config.height - 60
+        cy = self.config.height - 70
+        radius = 50
 
-        # Background circle
-        pygame.draw.circle(self.screen, (230, 230, 230), (cx, cy), 50)
-        pygame.draw.circle(self.screen, (200, 200, 200), (cx, cy), 50, 2)
+        # Background circle (compass)
+        pygame.draw.circle(self.screen, (240, 240, 240), (cx, cy), radius)
+        pygame.draw.circle(self.screen, (200, 200, 200), (cx, cy), radius, 2)
 
-        # Turn indicator (horizontal bar)
-        turn_width = int(self.turn_input * 40)
-        if turn_width != 0:
-            color = (100, 150, 255) if turn_width < 0 else (255, 150, 100)
-            bar_x = cx if turn_width > 0 else cx + turn_width
-            pygame.draw.rect(self.screen, color, (bar_x, cy - 5, abs(turn_width), 10))
+        # Target heading arrow (blue, thick)
+        tx = cx + int(radius * 0.85 * np.cos(self.target_heading))
+        ty = cy + int(radius * 0.85 * np.sin(self.target_heading))
+        pygame.draw.line(self.screen, (60, 100, 220), (cx, cy), (tx, ty), 3)
+        pygame.draw.circle(self.screen, (60, 100, 220), (tx, ty), 5)
 
-        # Speed indicator (vertical bar)
-        speed_height = int(self.speed_input * 40)
-        pygame.draw.rect(self.screen, (100, 200, 100),
-                        (cx - 5, cy - speed_height, 10, speed_height))
+        # Current heading arrow (red, thin)
+        ax = cx + int(radius * 0.7 * np.cos(self.current_heading))
+        ay = cy + int(radius * 0.7 * np.sin(self.current_heading))
+        pygame.draw.line(self.screen, (220, 80, 80), (cx, cy), (ax, ay), 2)
+        pygame.draw.circle(self.screen, (220, 80, 80), (ax, ay), 3)
 
         # Center dot
-        pygame.draw.circle(self.screen, (50, 50, 50), (cx, cy), 5)
+        pygame.draw.circle(self.screen, (50, 50, 50), (cx, cy), 4)
+
+        # Speed bar (right side of compass)
+        bar_x = cx + radius + 15
+        bar_h = int(self.speed_input * radius * 2)
+        bar_top = cy + radius - bar_h
+        pygame.draw.rect(self.screen, (200, 200, 200), (bar_x, cy - radius, 10, radius * 2), 1)
+        pygame.draw.rect(self.screen, (100, 200, 100), (bar_x, bar_top, 10, bar_h))
 
         # Labels
-        font = self.font
-        turn_text = font.render(f"Turn: {self.turn_input:.2f}", True, (100, 100, 100))
-        speed_text = font.render(f"Speed: {self.speed_input:.2f}", True, (100, 100, 100))
-        self.screen.blit(turn_text, (cx - 40, cy + 55))
-        self.screen.blit(speed_text, (cx - 45, cy + 75))
+        heading_deg = np.degrees(self.target_heading)
+        lbl1 = self.font.render(f"Target: {heading_deg:+.0f}\u00b0", True, (60, 100, 220))
+        lbl2 = self.font.render(f"Actual: {np.degrees(self.current_heading):+.0f}\u00b0", True, (220, 80, 80))
+        lbl3 = self.font.render(f"Speed: {self.speed_input:.2f}", True, (100, 100, 100))
+        self.screen.blit(lbl1, (cx - 50, cy + radius + 8))
+        self.screen.blit(lbl2, (cx - 50, cy + radius + 28))
+        self.screen.blit(lbl3, (cx - 50, cy + radius + 48))
 
     def draw_info_panel(self):
         """Draw information panel."""
+        error = self._wrap_angle(self.target_heading - self.current_heading)
         info_lines = [
             f"FPS: {int(self.clock.get_fps())}",
             f"Species: {self.n_species}",
             f"Particles: {self.n}",
             "",
-            f"Turn Input: {self.turn_input:+.2f}",
-            f"Speed Input: {self.speed_input:.2f}",
+            f"Target:  {np.degrees(self.target_heading):+.0f}\u00b0",
+            f"Actual:  {np.degrees(self.current_heading):+.0f}\u00b0",
+            f"Error:   {np.degrees(error):+.1f}\u00b0",
+            f"PD out:  {self.turn_input:+.2f}",
+            f"Kp={self.heading_kp:.1f}  Kd={self.heading_kd:.1f}",
             "",
             "Controls:",
-            "←/→: Turn left/right",
-            "↑/↓: Speed up/down",
+            "\u2190/\u2192: Rotate target heading",
+            "\u2191/\u2193: Speed up/down",
             "+/-: Add/remove species",
             "R: Reset  SPACE: Pause",
             "V: Centroids  I: Info  Q: Quit",
@@ -441,6 +489,9 @@ class MultiSpeciesDemo(ParticleLife):
 
         # Reset control state
         self.turn_input = 0.0
+        self.target_heading = -np.pi / 2
+        self.current_heading = -np.pi / 2
+        self.prev_heading_error = 0.0
         self.edit_row = 0
         self.edit_col = 0
 
@@ -475,6 +526,9 @@ class MultiSpeciesDemo(ParticleLife):
                 elif event.key == pygame.K_r:
                     self._initialize_side_by_side()
                     self.turn_input = 0.0
+                    self.target_heading = -np.pi / 2
+                    self.current_heading = -np.pi / 2
+                    self.prev_heading_error = 0.0
                     print("Reset positions")
 
                 elif event.key == pygame.K_i:
@@ -524,11 +578,12 @@ class MultiSpeciesDemo(ParticleLife):
         # Handle held keys for continuous control
         keys = pygame.key.get_pressed()
 
-        # Turn control
+        # Heading control — Left/Right rotate target heading
         if keys[pygame.K_LEFT]:
-            self.turn_input = max(-1.0, self.turn_input - 0.05)
+            self.target_heading -= self.heading_turn_rate
         if keys[pygame.K_RIGHT]:
-            self.turn_input = min(1.0, self.turn_input + 0.05)
+            self.target_heading += self.heading_turn_rate
+        self.target_heading = self._wrap_angle(self.target_heading)
 
         # Speed control
         if keys[pygame.K_UP]:
