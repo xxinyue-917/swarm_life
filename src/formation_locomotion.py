@@ -47,20 +47,25 @@ class FormationLocomotion(ShapeFormationDemo):
     def __init__(self, n_species: int = 6, n_particles: int = 20):
         super().__init__(n_species=n_species, n_particles=n_particles)
 
-        # Forward motion via K_pos asymmetry (along chain axis)
-        self.forward_bias = 0.0       # 0 = stationary, positive = move toward head
-        self.forward_bias_max = 0.25
-        self.forward_bias_step = 0.003
-
-        # Lateral motion via antisymmetric K_rot (perpendicular to chain axis)
+        # Forward motion via antisymmetric K_rot (perpendicular to chain axis)
         self.lateral_speed = 0.0
-        self.lateral_speed_max = 0.3
+        self.lateral_speed_max = 0.02
         self.lateral_speed_step = 0.005
+
+        # Lateral motion via K_pos asymmetry (along chain axis)
+        self.forward_bias = 0.0
+        self.forward_bias_max = 0.25
+        self.forward_bias_step = 0.005
+
+        # Trajectory tracking
+        self.show_trajectory = False
+        self.trajectory = []          # list of (x, y) centroid positions
+        self.trajectory_max = 500     # max points to keep
 
         # Start in control mode (PID active)
         self.control_mode = True
         self.show_centroids = False
-        self.phi0 = 0.4
+        self.phi0 = 0.25
 
         # PD gains (no integral)
         self.kp = 0.4
@@ -175,10 +180,10 @@ class FormationLocomotion(ShapeFormationDemo):
         n_edges = self.n_species - 1
         for i in range(n_edges):
             self.alignment_matrix[i, i + 1] = np.clip(
-                self.alignment_matrix[i, i + 1] + self.lateral_speed, -1.0, 1.0
+                self.alignment_matrix[i, i + 1] - self.lateral_speed, -1.0, 1.0
             )
             self.alignment_matrix[i + 1, i] = np.clip(
-                self.alignment_matrix[i + 1, i] - self.lateral_speed, -1.0, 1.0
+                self.alignment_matrix[i + 1, i] + self.lateral_speed, -1.0, 1.0
             )
 
     def step(self):
@@ -203,13 +208,54 @@ class FormationLocomotion(ShapeFormationDemo):
         # Physics
         ParticleLife.step(self)
 
+        # Record trajectory
+        if self.show_trajectory:
+            centroid = self.positions.mean(axis=0)
+            sx = int(centroid[0] * self.ppu)
+            sy = int(centroid[1] * self.ppu)
+            self.trajectory.append((sx, sy))
+            if len(self.trajectory) > self.trajectory_max:
+                self.trajectory.pop(0)
+
+    def _draw_trajectory(self):
+        """Draw the swarm centroid trajectory as a fading trail."""
+        n = len(self.trajectory)
+        if n < 2:
+            return
+        for i in range(1, n):
+            alpha = int(80 + 175 * i / n)  # fade from dim to bright
+            color = (alpha, alpha // 2, alpha // 3)
+            pygame.draw.line(self.screen, color,
+                             self.trajectory[i - 1], self.trajectory[i], 2)
+
     def draw(self):
-        """Draw with locomotion status."""
-        super().draw()
+        """Draw with trajectory and locomotion status."""
+        self.screen.fill((255, 255, 255))
+
+        # Trajectory underneath everything
+        if self.show_trajectory:
+            self._draw_trajectory()
+
+        # Particles
+        self.draw_particles()
+
+        # Shape extraction overlay
+        if self.shape_vis is not None:
+            self.draw_shape_extraction_overlay()
 
         if self.hide_gui:
             return
 
+        if self.show_centroids:
+            pts = self.draw_centroid_spine()
+            self.draw_centroid_markers(pts)
+            self.draw_swarm_centroid()
+
+        if self.show_info:
+            self.draw_control_indicator()
+            self.draw_info_panel()
+
+        self.draw_pause_indicator()
         self._draw_locomotion_status()
 
     def _draw_locomotion_status(self):
@@ -286,6 +332,7 @@ class FormationLocomotion(ShapeFormationDemo):
                     self._initialize_side_by_side()
                     self.forward_bias = 0.0
                     self.lateral_speed = 0.0
+                    self.trajectory.clear()
                     self._update_kpos()
                     self._init_control_state()
                     self._seed_phi_prev()
@@ -305,10 +352,38 @@ class FormationLocomotion(ShapeFormationDemo):
                     self.hide_gui = not self.hide_gui
                 elif event.key == pygame.K_o:
                     self.show_orientations = not self.show_orientations
+                elif event.key == pygame.K_t:
+                    self.show_trajectory = not self.show_trajectory
+                    if not self.show_trajectory:
+                        self.trajectory.clear()
 
                 elif event.key == pygame.K_c:
                     self.control_mode = not self.control_mode
                     print(f"Control mode: {'ON' if self.control_mode else 'OFF'}")
+
+                # Locomotion (discrete steps per keypress)
+                elif event.key == pygame.K_UP:
+                    self.lateral_speed = min(self.lateral_speed_max,
+                                             self.lateral_speed + 0.005)
+                    print(f"Forward (K_rot): {self.lateral_speed:.4f}")
+                elif event.key == pygame.K_DOWN:
+                    self.lateral_speed = max(0.0,
+                                             self.lateral_speed - 0.005)
+                    print(f"Forward (K_rot): {self.lateral_speed:.4f}")
+                elif event.key == pygame.K_RIGHT:
+                    self.forward_bias = min(self.forward_bias_max,
+                                            self.forward_bias + 0.02)
+                    if abs(self.forward_bias) < 0.01:
+                        self.forward_bias = 0.0
+                    self._update_kpos()
+                    print(f"Lateral (K_pos): {self.forward_bias:+.3f}")
+                elif event.key == pygame.K_LEFT:
+                    self.forward_bias = max(-self.forward_bias_max,
+                                            self.forward_bias - 0.02)
+                    if abs(self.forward_bias) < 0.01:
+                        self.forward_bias = 0.0
+                    self._update_kpos()
+                    print(f"Lateral (K_pos): {self.forward_bias:+.3f}")
 
                 elif event.key == pygame.K_g:
                     self.drawing_mode = True
@@ -372,27 +447,6 @@ class FormationLocomotion(ShapeFormationDemo):
                         self._adjust_matrix_value(0.1)
                     elif event.key in (pygame.K_x, pygame.K_MINUS):
                         self._adjust_matrix_value(-0.1)
-
-        # Held keys — locomotion
-        keys = pygame.key.get_pressed()
-
-        # Up/Down: forward (antisymmetric K_rot, perpendicular to chain)
-        if keys[pygame.K_UP]:
-            self.lateral_speed = min(self.lateral_speed_max,
-                                     self.lateral_speed + self.lateral_speed_step)
-        if keys[pygame.K_DOWN]:
-            self.lateral_speed = max(-self.lateral_speed_max,
-                                     self.lateral_speed - self.lateral_speed_step)
-
-        # Left/Right: lateral (K_pos forward_bias, along chain axis)
-        if keys[pygame.K_RIGHT]:
-            self.forward_bias = min(self.forward_bias_max,
-                                    self.forward_bias + self.forward_bias_step)
-            self._update_kpos()
-        if keys[pygame.K_LEFT]:
-            self.forward_bias = max(-self.forward_bias_max,
-                                    self.forward_bias - self.forward_bias_step)
-            self._update_kpos()
 
         return True
 
