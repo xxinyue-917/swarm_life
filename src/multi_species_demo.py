@@ -231,9 +231,15 @@ class MultiSpeciesDemo(ParticleLife):
         The swarm moves perpendicular to the chain (species 0 → species N-1).
         This is stable because it depends on cluster positions, not velocities.
         """
-        head_pos = self.positions[self.species == 0].mean(axis=0)
-        tail_pos = self.positions[self.species == self.n_species - 1].mean(axis=0)
+        head_mask = self.species == 0
+        tail_mask = self.species == self.n_species - 1
+        if not head_mask.any() or not tail_mask.any():
+            return  # No particles in head/tail species
+        head_pos = self.positions[head_mask].mean(axis=0)
+        tail_pos = self.positions[tail_mask].mean(axis=0)
         chain_vec = tail_pos - head_pos
+        if np.linalg.norm(chain_vec) < 0.01:
+            return  # Degenerate chain, keep previous heading
         chain_angle = np.arctan2(chain_vec[1], chain_vec[0])
         # Motion is perpendicular to chain axis
         self.current_heading = self._wrap_angle(chain_angle - np.pi / 2)
@@ -261,7 +267,7 @@ class MultiSpeciesDemo(ParticleLife):
         if self.paused:
             return
 
-        # Measure current heading from swarm velocity
+        # Measure current heading from chain axis orientation
         self._measure_heading()
 
         # PD controller drives turn_input

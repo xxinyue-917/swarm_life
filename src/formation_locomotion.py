@@ -29,7 +29,6 @@ import numpy as np
 from particle_life import ParticleLife
 from shape_formation import (
     MultiSpeciesDemo as ShapeFormationDemo,
-    generate_position_matrix,
     wrap_to_pi,
 )
 
@@ -47,15 +46,15 @@ class FormationLocomotion(ShapeFormationDemo):
     def __init__(self, n_species: int = 6, n_particles: int = 20):
         super().__init__(n_species=n_species, n_particles=n_particles)
 
-        # Forward motion via antisymmetric K_rot (perpendicular to chain axis)
+        # Lateral motion via antisymmetric K_rot (perpendicular to chain axis)
         self.lateral_speed = 0.0
         self.lateral_speed_max = 0.02
         self.lateral_speed_step = 0.005
 
-        # Lateral motion via K_pos asymmetry (along chain axis)
+        # Forward motion via K_pos asymmetry (along chain axis toward head)
         self.forward_bias = 0.0
         self.forward_bias_max = 0.25
-        self.forward_bias_step = 0.005
+        self.forward_bias_step = 0.02
 
         # Trajectory tracking
         self.show_trajectory = False
@@ -87,8 +86,8 @@ class FormationLocomotion(ShapeFormationDemo):
         print("=" * 60)
         print("Formation Locomotion — Shape + Movement")
         print("=" * 60)
-        print("  ↑/↓     Forward speed (K_rot, perpendicular to chain)")
-        print("  ←/→     Lateral speed (K_pos, along chain)")
+        print("  ↑/↓     Lateral speed (K_rot, perpendicular to chain)")
+        print("  ←/→     Forward speed (K_pos, along chain)")
         print("  1-4     Shape: STRAIGHT/U/M/HUG")
         print("  G/F     Draw shape / filled contour")
         print("  [/]     Adjust curvature (phi0)")
@@ -98,7 +97,6 @@ class FormationLocomotion(ShapeFormationDemo):
     def _update_kpos(self):
         """Regenerate K_pos with current forward_bias."""
         n = self.n_species
-        pps = self.config.n_particles
         K = np.zeros((n, n))
         for i in range(n):
             K[i, i] = self.self_cohesion
@@ -276,7 +274,7 @@ class FormationLocomotion(ShapeFormationDemo):
                 pygame.draw.rect(self.screen, color, (cx - fill_w, y, fill_w, bar_h))
         pygame.draw.line(self.screen, (100, 100, 100),
                          (x + bar_w // 2, y), (x + bar_w // 2, y + bar_h), 2)
-        text = self.font.render(f"Lateral (K_pos): {self.forward_bias:+.3f}", True, (80, 80, 80))
+        text = self.font.render(f"Forward (K_pos): {self.forward_bias:+.3f}", True, (80, 80, 80))
         self.screen.blit(text, (x, y - 18))
 
         # Lateral (K_rot)
@@ -292,7 +290,7 @@ class FormationLocomotion(ShapeFormationDemo):
                 pygame.draw.rect(self.screen, color, (cx - fill_w, y2, fill_w, bar_h))
         pygame.draw.line(self.screen, (100, 100, 100),
                          (x + bar_w // 2, y2), (x + bar_w // 2, y2 + bar_h), 2)
-        text = self.font.render(f"Forward (K_rot): {self.lateral_speed:+.3f}", True, (80, 80, 80))
+        text = self.font.render(f"Lateral (K_rot): {self.lateral_speed:.4f}", True, (80, 80, 80))
         self.screen.blit(text, (x, y2 - 18))
 
     def handle_events(self) -> bool:

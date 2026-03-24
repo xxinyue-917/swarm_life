@@ -137,7 +137,7 @@ class FormationTransport(FormationLocomotion):
             self.object_vel = self.object_vel / speed * 1.5
 
         # Update position
-        self.object_pos += self.object_vel * 0.05
+        self.object_pos += self.object_vel * self.config.dt
 
         # Boundary reflection
         margin = 0.3
@@ -152,7 +152,7 @@ class FormationTransport(FormationLocomotion):
 
         # Check goal
         dist_to_goal = np.linalg.norm(self.object_pos - self.goal_pos)
-        if dist_to_goal < self.goal_radius:
+        if dist_to_goal < self.goal_radius and not self.task_complete:
             self.task_complete = True
             print("Task complete! Object delivered to goal.")
 
@@ -164,9 +164,10 @@ class FormationTransport(FormationLocomotion):
 
     def _draw_object(self):
         """Draw the passive object."""
-        ox = int(self.object_pos[0] * self.ppu)
-        oy = int(self.object_pos[1] * self.ppu)
-        r = max(4, int(self.object_radius * self.ppu))
+        z = getattr(self, 'zoom', 1.0)
+        ox = int(self.object_pos[0] * self.ppu * z)
+        oy = int(self.object_pos[1] * self.ppu * z)
+        r = max(4, int(self.object_radius * self.ppu * z))
 
         # Object body
         color = (240, 160, 50) if not self.task_complete else (100, 200, 100)
@@ -176,9 +177,10 @@ class FormationTransport(FormationLocomotion):
 
     def _draw_goal(self):
         """Draw the goal zone."""
-        gx = int(self.goal_pos[0] * self.ppu)
-        gy = int(self.goal_pos[1] * self.ppu)
-        gr = max(6, int(self.goal_radius * self.ppu))
+        z = getattr(self, 'zoom', 1.0)
+        gx = int(self.goal_pos[0] * self.ppu * z)
+        gy = int(self.goal_pos[1] * self.ppu * z)
+        gr = max(6, int(self.goal_radius * self.ppu * z))
 
         # Dashed circle effect — draw ring segments
         color = (80, 200, 80) if not self.task_complete else (50, 255, 50)
