@@ -55,13 +55,21 @@ F_tangential = -10 × K_rot[i,j] × (ω_j/ω_max) × (a_rot/r) × t̂
 
 ```
 src/
-├── particle_life.py    # Core simulation + interactive visualization
-├── metrics.py          # Quantitative behavior characterization
-├── sweep.py            # Parameter space exploration
-├── plot_heatmaps.py    # Visualization of sweep results
-└── save_videos.py      # Video generation from presets
+├── particle_life.py       # Core 2D simulation + interactive visualization
+├── particle_life_3d.py    # Core 3D simulation with orthographic projection
+├── metrics.py             # Quantitative behavior characterization
+├── sweep.py               # Parameter space exploration
+├── plot_heatmaps.py       # Visualization of sweep results
+├── save_videos.py         # Video generation from presets
+├── multi_species_demo.py  # N-species swarm with PD heading controller
+├── snake_demo.py          # Chain steering with delayed turn propagation
+├── shape_formation.py     # PID joint-angle controller for arbitrary shapes
+├── formation_chain.py     # Long-chain shape morphing (60+ species)
+├── formation_locomotion.py# Shape + locomotion (K_rot forward + K_pos lateral)
+├── snake_demo_3d.py       # 3D snake navigation
+└── snake_maze_3d.py       # 3D maze with intro animation + autopilot
 
-presets/                # Discovered behavior configurations (JSON)
+presets/                   # Discovered behavior configurations (JSON)
 ```
 
 ### Core Classes
@@ -163,6 +171,38 @@ python src/plot_heatmaps.py --csv results/results.csv --out plots/
 
 ---
 
+## Formation Locomotion (`formation_locomotion.py`)
+
+Combines shape formation with two independent locomotion channels:
+
+### Locomotion Mechanisms
+
+| Channel | Matrix | Direction | Mechanism |
+|---------|--------|-----------|-----------|
+| **Forward** | K_rot (antisymmetric) | Perpendicular to chain | Equal tangential forces on both species in each pair |
+| **Lateral** | K_pos (forward_bias) | Along chain axis | Asymmetric attraction: stronger toward tail → drift toward head |
+
+**Key insight**: Antisymmetric K_rot and symmetric K_rot (PID shape) are independent — antisymmetric forces shift all segment angles θ equally, so joint angles φ = θ[j+1] − θ[j] are unchanged. The PID shape controller and locomotion don't interfere.
+
+### Compression Effect on Curved Chains
+
+On a C-shape, uniform antisymmetric K_rot creates tangential forces perpendicular to each local segment. Because segments point in different directions on a curve, these forces have a net inward component → the formation compresses. This is the true physics of local-only tangential drive and cannot be eliminated without global knowledge. Shape compression is resisted by K_pos cross-attraction (local inter-species radial forces).
+
+### Controls
+
+```
+↑/↓:   Forward speed (K_rot antisymmetric, 0 to 0.02, step 0.005)
+←/→:   Lateral speed (K_pos forward_bias, step 0.02)
+1-4:   Shape pattern (STRAIGHT/U/M/HUG)
+G/F:   Draw open shape / filled contour
+[/]:   Adjust curvature (phi0)
+T:     Toggle trajectory display
++/-:   Species count (2-10)
+C:     Toggle PID control
+```
+
+---
+
 ## Research Directions
 
 ### 1. Behavior Classification
@@ -208,6 +248,14 @@ python src/plot_heatmaps.py --csv results/results.csv --out plots/
 python src/particle_life.py
 python src/particle_life.py --load presets/3_planet.json
 
+# Demo simulations
+python src/multi_species_demo.py       # PD heading controller demo
+python src/snake_demo.py               # Snake with delayed turn propagation
+python src/shape_formation.py          # PID shape formation + mouse drawing
+python src/formation_locomotion.py     # Shape + locomotion (K_rot + K_pos)
+python src/formation_chain.py          # Long-chain shape morphing
+python src/snake_maze_3d.py            # 3D maze with intro + autopilot
+
 # Parameter sweep (headless)
 python src/sweep.py --grid 10 --ori-cases A,B --burnin 200 --steps 500 --seeds 3
 
@@ -246,14 +294,23 @@ pip install opencv-python  # For video recording
 - Asymmetric K_pos matrices tend to produce more dynamic (non-equilibrium) behaviors
 - Strong diagonal values (same-species attraction) create tight clusters
 - Orientation matrix effects are most visible when radial forces are balanced
+- **Locomotion orthogonality**: Antisymmetric K_rot (tangential) and K_pos forward_bias (radial) create motion in perpendicular directions — this gives full 2D locomotion control for formations
+- **Compression on curved chains**: Uniform antisymmetric K_rot on a C-shape creates net inward force because tangential directions diverge on curves. This is a fundamental tradeoff: local-only tangential drive cannot produce shape-preserving translation on curved formations without global coordination
+- **Chain self-intersection**: With >10 species starting from random positions, chains almost always cross themselves. Non-adjacent species have K_pos=0, so there's no force to untangle crossings
+- **PID jitter sources**: Integral term (ki) causes oscillation through windup; velocity-based heading measurement is noisy (use centroid displacement or chain axis orientation instead); dead zones on error help eliminate micro-corrections
 
 ### Hypotheses to Test
 - [ ] Is there a critical K_pos threshold for chase vs encapsulate transition?
 - [ ] Do 3-species systems show qualitatively different phase diagrams than 2-species?
 - [ ] How does orientation coupling modify stability boundaries?
+- [ ] Can compression on curved chains be quantified as a function of curvature × move_speed?
+- [ ] Does K_pos cross-attraction strength have a critical threshold for resisting locomotion compression?
+- [ ] Can non-adjacent weak repulsion untangle chain crossings without destabilizing the formation?
 
 ### TODO
 - [ ] Run comprehensive sweep with finer grid resolution
 - [ ] Implement additional metrics (polarization, angular momentum)
 - [ ] Compare simulation results with physical robot experiments
 - [ ] Explore higher species counts (N > 3)
+- [ ] Quantify shape fidelity vs locomotion speed tradeoff curve
+- [ ] Test formation locomotion with drawn shapes (F key) under various speeds
