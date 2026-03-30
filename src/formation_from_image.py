@@ -22,6 +22,7 @@ Controls:
     Q/ESC: Quit
 """
 
+import os
 import numpy as np
 import pygame
 import pygame.gfxdraw
@@ -105,12 +106,66 @@ def generate_star_mask(size=200, n_points=5):
     return mask
 
 
+def generate_cross_mask(size=200):
+    mask = np.zeros((size, size), dtype=bool)
+    m = size // 6
+    arm = size // 4
+    cx, cy = size // 2, size // 2
+    mask[cy - arm:cy + arm, cx - m:cx + m] = True  # vertical
+    mask[cy - m:cy + m, cx - arm:cx + arm] = True  # horizontal
+    return mask
+
+
+def generate_crescent_mask(size=200):
+    y, x = np.ogrid[:size, :size]
+    cx, cy = size // 2, size // 2
+    r_outer = size // 2 - 10
+    r_inner = int(r_outer * 0.75)
+    offset = int(r_outer * 0.35)
+    outer = (x - cx) ** 2 + (y - cy) ** 2 < r_outer ** 2
+    inner = (x - cx - offset) ** 2 + (y - cy) ** 2 < r_inner ** 2
+    return outer & ~inner
+
+
+def generate_letter_L_mask(size=200):
+    mask = np.zeros((size, size), dtype=bool)
+    m = size // 8
+    w = size // 4
+    # Vertical bar
+    mask[m:size - m, m:m + w] = True
+    # Horizontal bar
+    mask[size - m - w:size - m, m:size - m] = True
+    return mask
+
+
+def generate_arrow_mask(size=200):
+    mask = np.zeros((size, size), dtype=bool)
+    cx = size // 2
+    # Arrow head (triangle pointing right)
+    for y in range(size):
+        dy = abs(y - cx)
+        x_right = size - size // 6
+        x_left = cx
+        if dy < (size // 3):
+            progress = 1.0 - dy / (size // 3)
+            x_end = int(x_left + (x_right - x_left) * progress)
+            mask[y, x_left:x_end] = True
+    # Arrow shaft
+    shaft_h = size // 8
+    mask[cx - shaft_h:cx + shaft_h, size // 8:cx] = True
+    return mask
+
+
 BUILT_IN_SHAPES = {
     1: ("Circle", generate_circle_mask),
     2: ("Star", generate_star_mask),
     3: ("Square", generate_square_mask),
     4: ("Ring", generate_ring_mask),
     5: ("Triangle", generate_triangle_mask),
+    6: ("Cross", generate_cross_mask),
+    7: ("Crescent", generate_crescent_mask),
+    8: ("Letter L", generate_letter_L_mask),
+    9: ("Arrow", generate_arrow_mask),
 }
 
 
@@ -126,25 +181,17 @@ def load_shape_mask(image_path, threshold=128):
     return arr < threshold
 
 
-def open_file_dialog():
-    """Open a file dialog to select an image. Returns path or None."""
+def prompt_image_path():
+    """Prompt user for image path via console. Returns path or None."""
+    print("\nEnter image path (or drag file into terminal):")
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        path = filedialog.askopenfilename(
-            title="Select shape image",
-            filetypes=[
-                ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif"),
-                ("All files", "*.*"),
-            ]
-        )
-        root.destroy()
-        return path if path else None
-    except Exception as e:
-        print(f"File dialog error: {e}")
+        path = input("  > ").strip().strip("'\"")  # Strip quotes from drag-and-drop
+        if path and os.path.isfile(path):
+            return path
+        elif path:
+            print(f"  File not found: {path}")
+        return None
+    except (EOFError, KeyboardInterrupt):
         return None
 
 
@@ -253,6 +300,8 @@ class FormationFromImage(ParticleLife):
 
         self.show_targets = False
         self.hide_gui = False
+        self.mask_surface = None  # Cached pygame surface for shape preview
+        self._update_mask_surface()
 
         self._initialize_near_targets()
 
@@ -266,8 +315,9 @@ class FormationFromImage(ParticleLife):
         print(f"Shape: {self.shape_name}")
         print(f"Species: {self.n_species}  Sigma: {self.sigma:.2f}")
         print("")
-        print("  L       Load image (file dialog)")
+        print("  L       Load image (type path in console)")
         print("  1-5     Circle / Star / Square / Ring / Triangle")
+        print("  6-9     Cross / Crescent / Letter L / Arrow")
         print("  R/S     Reset near targets / Scatter randomly")
         print("  +/-     Species count")
         print("  [/]     Adjust sigma")
@@ -311,13 +361,14 @@ class FormationFromImage(ParticleLife):
         )
         self.matrix[:] = K_pos
         self.alignment_matrix[:] = 0.0
-        self._initialize_near_targets()
+        self._scatter()
+        self._update_mask_surface()
         print(f"Shape: {name}  Sigma: {self.sigma:.2f}  "
               f"K_pos nonzero: {np.count_nonzero(K_pos)}/{self.n_species**2}")
 
     def _load_image_dialog(self):
-        """Open file dialog, load image, apply as shape."""
-        path = open_file_dialog()
+        """Prompt for image path in console, load and apply."""
+        path = prompt_image_path()
         if path:
             try:
                 mask = load_shape_mask(path)
@@ -382,6 +433,20 @@ class FormationFromImage(ParticleLife):
         print(f"Sigma: {self.sigma:.2f} (scale: {self.sigma_scale:.1f})  "
               f"Nonzero: {np.count_nonzero(K_pos)}/{self.n_species**2}")
 
+    def _update_mask_surface(self):
+        """Convert current mask to a pygame surface thumbnail for preview."""
+        if self.mask is None:
+            self.mask_surface = None
+            return
+        h, w = self.mask.shape
+        # Create RGB array: shape pixels = dark gray, background = light gray
+        rgb = np.full((h, w, 3), 230, dtype=np.uint8)  # light bg
+        rgb[self.mask] = [80, 80, 80]  # dark shape
+        # Scale to thumbnail size
+        thumb_size = 120
+        surf = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
+        self.mask_surface = pygame.transform.smoothscale(surf, (thumb_size, thumb_size))
+
     # ================================================================
     # Drawing
     # ================================================================
@@ -397,6 +462,9 @@ class FormationFromImage(ParticleLife):
         if self.hide_gui:
             return
 
+        # Shape preview (top right)
+        self._draw_shape_preview()
+
         if self.show_centroids:
             self.draw_swarm_centroid()
 
@@ -404,6 +472,26 @@ class FormationFromImage(ParticleLife):
             self._draw_info()
 
         self.draw_pause_indicator()
+
+    def _draw_shape_preview(self):
+        """Draw the target shape thumbnail in the top-right corner."""
+        if self.mask_surface is None:
+            return
+        pad = 10
+        x = self.config.width - self.mask_surface.get_width() - pad
+        y = pad
+
+        # Border
+        rect = pygame.Rect(x - 2, y - 2,
+                           self.mask_surface.get_width() + 4,
+                           self.mask_surface.get_height() + 4)
+        pygame.draw.rect(self.screen, (180, 180, 180), rect, 2)
+
+        self.screen.blit(self.mask_surface, (x, y))
+
+        # Label
+        label = self.font.render(self.shape_name, True, (100, 100, 100))
+        self.screen.blit(label, (x, y + self.mask_surface.get_height() + 4))
 
     def _draw_targets(self):
         z = getattr(self, 'zoom', 1.0)
@@ -425,7 +513,7 @@ class FormationFromImage(ParticleLife):
             f"Species: {self.n_species}  Particles: {self.n}",
             f"Sigma: {self.sigma:.2f} (scale: {self.sigma_scale:.1f})",
             "",
-            "L: Load image  1-5: Built-in",
+            "L: Load image  1-9: Built-in",
             "R: Reset  S: Scatter",
             "+/-: Species  [/]: Sigma",
             "T: Targets  V: Centroids",
@@ -481,6 +569,14 @@ class FormationFromImage(ParticleLife):
                     self._load_shape(generate_ring_mask(200), "Ring")
                 elif event.key == pygame.K_5:
                     self._load_shape(generate_triangle_mask(200), "Triangle")
+                elif event.key == pygame.K_6:
+                    self._load_shape(generate_cross_mask(200), "Cross")
+                elif event.key == pygame.K_7:
+                    self._load_shape(generate_crescent_mask(200), "Crescent")
+                elif event.key == pygame.K_8:
+                    self._load_shape(generate_letter_L_mask(200), "Letter L")
+                elif event.key == pygame.K_9:
+                    self._load_shape(generate_arrow_mask(200), "Arrow")
 
                 # Species count
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
