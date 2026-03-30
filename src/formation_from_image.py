@@ -214,7 +214,6 @@ def compute_kpos_gaussian(points, sigma=None, self_cohesion=0.8, max_attraction=
         sigma = np.median(nn_dists) * 1.5 if nn_dists else 1.0
 
     K = max_attraction * np.exp(-dists ** 2 / (2 * sigma ** 2))
-    np.fill_diagonal(K, self_cohesion)
     K[K < max_attraction * 0.01] = 0.0
     np.fill_diagonal(K, self_cohesion)
 
@@ -299,13 +298,14 @@ class FormationFromImage(ParticleLife):
 
     def _load_shape(self, mask, name="Custom"):
         """Load a new shape mask, resample, recompute K_pos, reinitialize."""
-        self.mask = mask
-        self.shape_name = name
-
-        self.target_points = sample_points_in_mask(
-            self.mask, self.n_species,
+        # Sample first — only update state if successful
+        target_points = sample_points_in_mask(
+            mask, self.n_species,
             self.config.sim_width, self.config.sim_height
         )
+        self.mask = mask
+        self.shape_name = name
+        self.target_points = target_points
         K_pos, self.sigma = compute_kpos_gaussian(
             self.target_points, sigma=None
         )
@@ -333,6 +333,7 @@ class FormationFromImage(ParticleLife):
 
         print(f"Species: {self.n_species} → {n_species}")
         self.config.n_species = n_species
+        self.config.n_particles = self.n_particles_per
         self.n_species = n_species
         self.n = self.n_particles_per * n_species
 
@@ -343,6 +344,11 @@ class FormationFromImage(ParticleLife):
         K_pos, self.sigma = compute_kpos_gaussian(self.target_points)
         self.matrix = K_pos
         self.alignment_matrix = np.zeros((n_species, n_species))
+
+        # Sync parent references
+        if hasattr(self.config, '_position_matrix_np'):
+            self.config._position_matrix_np = self.matrix
+            self.config._orientation_matrix_np = self.alignment_matrix
 
         self.colors = []
         for i in range(n_species):
