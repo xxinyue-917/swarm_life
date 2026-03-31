@@ -43,7 +43,7 @@ CONFIG = {
     #   'krot_offdiag'  — sweep R₁₂ vs R₂₁
     #   'krot_diag'     — sweep R₁₁ vs R₂₂
     #   'kpos_x_krot'   — sweep K₁₂ vs K₂₁ for each K_rot case (A/B/C/D)
-    'sweep_type': 'kpos_offdiag',
+    'sweep_type': 'krot_full',
 
     # ----------------------------------------------------------
     # GRID RESOLUTION
@@ -55,7 +55,7 @@ CONFIG = {
     # ----------------------------------------------------------
     # FIXED MATRIX VALUES (when not being swept)
     # ----------------------------------------------------------
-    'K11': 0.6,    'K22': 0.6,    'K12': 0.0,    'K21': 0.0,
+    'K11': 0.6,    'K22': 0.6,    'K12': 0.3,    'K21': 0.3,
     'R11': 0.0,    'R22': 0.0,    'R12': 0.0,    'R21': 0.0,
 
     # ----------------------------------------------------------
@@ -260,6 +260,16 @@ def generate_sweep_points(cfg):
                     case_vals['R21'], case_vals['R22'])
                 points.append(('K12', k12, 'K21', k21, case_name, K_pos, K_rot))
 
+    elif sweep_type == 'krot_full':
+        # 4D sweep: all 4 K_rot entries
+        for r11, r12, r21, r22 in product(grid, grid, grid, grid):
+            K_pos, K_rot = build_matrices(
+                cfg['K11'], cfg['K12'], cfg['K21'], cfg['K22'],
+                r11, r12, r21, r22)
+            # Name: "R11_R12_R21_R22"
+            name = f"{r11:.1f}_{r12:.1f}_{r21:.1f}_{r22:.1f}"
+            points.append(('R12', r12, 'R21', r21, name, K_pos, K_rot))
+
     else:
         raise ValueError(f"Unknown sweep_type: {sweep_type}")
 
@@ -292,16 +302,17 @@ def run_and_record(K_pos, K_rot, cfg, p1_name, p1_val, p2_name, p2_val,
     )
 
     sim = ParticleLife(config, headless=False)
+
+    # Scatter particles randomly across the workspace
+    m = 0.5
+    sim.positions[:, 0] = np.random.uniform(m, cfg['sim_width'] - m, sim.n)
+    sim.positions[:, 1] = np.random.uniform(m, cfg['sim_height'] - m, sim.n)
+    sim.velocities[:] = 0.0
+
     recorder = VideoRecorder(video_path, cfg['fps'],
                              cfg['window_width'], cfg['window_height'])
 
-    # Burn-in (no recording)
-    for _ in range(cfg['burnin_steps']):
-        sim.step()
-        for event in pygame.event.get():
-            pass
-
-    # Record
+    # Record everything — including self-organization from random start
     total_frames = cfg['video_duration'] * cfg['fps']
     clock = pygame.time.Clock()
 
@@ -340,7 +351,7 @@ def main():
     sweep_type = cfg['sweep_type']
 
     # Output directories
-    base_dir = Path(__file__).parent / cfg['output_dir'] / f"sweep_{sweep_type}"
+    base_dir = Path(__file__).parent / cfg['output_dir'] / sweep_type
     video_dir = base_dir / 'videos'
     screenshot_dir = base_dir / 'screenshots'
     video_dir.mkdir(parents=True, exist_ok=True)
@@ -381,11 +392,14 @@ def main():
     t_start = time.time()
 
     for idx, (p1n, p1v, p2n, p2v, kcase, K_pos, K_rot) in enumerate(points):
-        # File naming
+        # File naming: concise, sortable
+        # e.g., "0.5_-0.5" or "0.5_-0.5_B"
+        v1 = f"{p1v:.1f}"
+        v2 = f"{p2v:.1f}"
         if kcase:
-            name = f"{p1n}={p1v:+.2f}_{p2n}={p2v:+.2f}_case{kcase}"
+            name = f"{v1}_{v2}_{kcase}"
         else:
-            name = f"{p1n}={p1v:+.2f}_{p2n}={p2v:+.2f}"
+            name = f"{v1}_{v2}"
 
         # Skip if already done
         if name in existing:

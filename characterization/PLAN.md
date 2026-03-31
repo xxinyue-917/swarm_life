@@ -123,11 +123,11 @@ Each video shows the simulation with matrix values overlaid. Each screenshot cap
 ## Status
 
 - [x] Plan created
-- [ ] Sweep 1: K_pos off-diagonal
-- [ ] Sweep 2: K_pos × K_rot cases
-- [ ] Sweep 3: K_rot off-diagonal
-- [ ] Sweep 4: K_pos diagonal
-- [ ] Sweep 5: K_rot diagonal
-- [ ] Sweep 6: Full K_rot
+- [x] Sweep 1: K_pos off-diagonal (25 videos, 255s)
+- [x] Sweep 2: K_pos × K_rot cases (100 videos, 1022s)
+- [x] Sweep 3: K_rot off-diagonal (25 videos, 255s)
+- [x] Sweep 4: K_pos diagonal (25 videos)
+- [x] Sweep 5: K_rot diagonal (25 videos)
+- [x] Sweep 6: Full K_rot (625 videos, 6473s)
 - [ ] Plotting and analysis
 - [ ] Behavior classification
