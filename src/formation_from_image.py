@@ -199,8 +199,14 @@ def prompt_image_path():
 # Points sampling and K_pos computation
 # =============================================================================
 
-def sample_points_in_mask(mask, n_points, sim_w, sim_h, min_dist_factor=0.5):
-    """Sample n_points uniformly within the mask, mapped to sim coordinates."""
+def sample_points_in_mask(mask, n_points, sim_w, sim_h, lloyd_iters=20):
+    """Sample n_points uniformly within the mask using Lloyd's relaxation.
+
+    1. Random initial placement within the mask
+    2. Lloyd's relaxation: iteratively move each point to the centroid
+       of its Voronoi region (restricted to the mask)
+    This produces very uniform spacing — much better than rejection sampling.
+    """
     h, w = mask.shape
     ys, xs = np.where(mask)
     if len(xs) == 0:
@@ -210,38 +216,37 @@ def sample_points_in_mask(mask, n_points, sim_w, sim_h, min_dist_factor=0.5):
     scale_x = (sim_w - 2 * margin) / w
     scale_y = (sim_h - 2 * margin) / h
 
-    shape_area = len(xs) * scale_x * scale_y
-    ideal_spacing = np.sqrt(shape_area / n_points) * min_dist_factor
+    # Step 1: Random initial placement (in pixel coords)
+    indices = np.random.choice(len(xs), size=n_points, replace=False)
+    pts_px = np.column_stack([xs[indices], ys[indices]]).astype(float)
 
-    points = []
-    max_attempts = n_points * 200
-    attempts = 0
+    # Step 2: Lloyd's relaxation in pixel space
+    # Pre-compute all valid pixel coordinates for Voronoi assignment
+    all_pixels = np.column_stack([xs, ys]).astype(float)  # (M, 2)
 
-    while len(points) < n_points and attempts < max_attempts:
-        idx = np.random.randint(len(xs))
-        px, py = xs[idx], ys[idx]
-        sx = margin + px * scale_x
-        sy = margin + py * scale_y
+    for _ in range(lloyd_iters):
+        # Assign each mask pixel to nearest point (Voronoi)
+        # Use chunked computation to avoid huge memory allocation
+        chunk_size = 5000
+        labels = np.empty(len(all_pixels), dtype=int)
+        for start in range(0, len(all_pixels), chunk_size):
+            end = min(start + chunk_size, len(all_pixels))
+            chunk = all_pixels[start:end]
+            dists = np.linalg.norm(chunk[:, np.newaxis, :] - pts_px[np.newaxis, :, :], axis=2)
+            labels[start:end] = np.argmin(dists, axis=1)
 
-        if len(points) > 0:
-            dists = np.linalg.norm(np.array(points) - [sx, sy], axis=1)
-            if dists.min() < ideal_spacing:
-                attempts += 1
-                if attempts % (n_points * 20) == 0:
-                    ideal_spacing *= 0.8
-                continue
+        # Move each point to the centroid of its Voronoi region
+        for k in range(n_points):
+            region = all_pixels[labels == k]
+            if len(region) > 0:
+                pts_px[k] = region.mean(axis=0)
 
-        points.append([sx, sy])
-        attempts += 1
+    # Convert to sim coordinates
+    points = np.zeros((n_points, 2))
+    points[:, 0] = margin + pts_px[:, 0] * scale_x
+    points[:, 1] = margin + pts_px[:, 1] * scale_y
 
-    while len(points) < n_points:
-        idx = np.random.randint(len(xs))
-        px, py = xs[idx], ys[idx]
-        sx = margin + px * scale_x
-        sy = margin + py * scale_y
-        points.append([sx, sy])
-
-    return np.array(points[:n_points])
+    return points
 
 
 def compute_kpos_gaussian(points, sigma=None, self_cohesion=0.8, max_attraction=0.3):
