@@ -104,6 +104,58 @@ characterization/
 
 File naming: `{param1}_{param2}.mp4` (or `{param1}_{param2}_{case}.mp4` for multi-case sweeps). Videos show simulation with matrix values overlaid. Screenshots capture final state.
 
+## Quantitative Metrics
+
+All metrics measured across the **last 20%** of simulation timesteps and averaged.
+
+| # | Metric | Symbol | Description |
+|---|--------|--------|-------------|
+| 1 | Max distance (group 1) | max_d1 | Max pairwise distance within species 1 — shows if group is clustered or spread |
+| 2 | Max distance (group 2) | max_d2 | Max pairwise distance within species 2 |
+| 3 | Centroid distance | centroid_dist | Distance between centroids of the two groups — concentric vs separated |
+| 4 | Avg speed (all) | avg_speed | Mean speed across all agents |
+| 5 | Avg speed (group 1) | avg_speed1 | Mean speed of species 1 |
+| 6 | Avg speed (group 2) | avg_speed2 | Mean speed of species 2 |
+| 7 | Kinetic energy | KE | Mean v² across all agents |
+| 8 | MSD (all) | MSD | Mean square displacement from initial positions |
+| 9 | MSD (group 1) | MSD1 | MSD for species 1 |
+| 10 | MSD (group 2) | MSD2 | MSD for species 2 |
+| 11 | Avg spacing (all) | spacing_all | Mean pairwise distance across all agents |
+| 12 | Avg spacing (same group) | spacing_same | Mean pairwise distance within same species (avg of group 1 and 2) |
+| 13 | Avg spacing (group 1) | spacing1 | Mean pairwise distance within species 1 |
+| 14 | Avg spacing (group 2) | spacing2 | Mean pairwise distance within species 2 |
+
+**Future**: Revolution/rotation order parameters (pending).
+
+Each metric produces one heatmap per 2D sweep → 14 heatmaps per sweep configuration.
+
+## Output Structure
+
+```
+characterization/
+├── PLAN.md                     # This document
+├── sweep_2species.py           # Video + screenshot sweep
+├── sweep_metrics.py            # Headless metrics sweep (CSV output)
+├── plot_heatmaps.py            # Generate heatmaps from CSV
+├── make_grids.py               # Screenshot grid images
+├── make_slides.py              # PowerPoint generation
+├── results/
+│   ├── kpos_offdiag/           # Sweep 1 videos/screenshots
+│   ├── kpos_x_krot/            # Sweep 2
+│   ├── krot_offdiag/           # Sweep 3
+│   ├── kpos_diag/              # Sweep 4
+│   ├── krot_diag/              # Sweep 5
+│   ├── krot_full/              # Sweep 6
+│   ├── grids/                  # 5×5 screenshot grids
+│   └── metrics/                # CSV files + heatmap PNGs
+│       ├── kpos_offdiag.csv
+│       ├── kpos_offdiag/       # Heatmap images
+│       │   ├── max_d1.png
+│       │   ├── centroid_dist.png
+│       │   └── ...
+│       └── ...
+```
+
 ## Status
 
 - [x] Plan created
@@ -113,8 +165,8 @@ File naming: `{param1}_{param2}.mp4` (or `{param1}_{param2}_{case}.mp4` for mult
 - [x] Sweep 4: K_pos diagonal (25 videos)
 - [x] Sweep 5: K_rot diagonal (25 videos)
 - [x] Sweep 6: Full K_rot (625 videos, 6473s)
-- [ ] Visual review and behavior identification
-- [ ] Quantitative metrics (pending — decide after visual review)
+- [ ] Quantitative metrics sweep (headless)
+- [ ] Heatmap generation
 - [ ] Behavior classification
 
 ## Total: 825 videos generated

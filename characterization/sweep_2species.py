@@ -48,7 +48,7 @@ CONFIG = {
     # ----------------------------------------------------------
     # GRID RESOLUTION
     # ----------------------------------------------------------
-    'grid_points': 5,         # Points per axis (5 → 25 videos, 11 → 121 videos)
+    'grid_points': 5,         # Points per axis (5 → 25 videos, interval 0.5)
     'param_min': -1.0,
     'param_max':  1.0,
 
@@ -85,7 +85,7 @@ CONFIG = {
     # ----------------------------------------------------------
     # VIDEO / SCREENSHOT SETTINGS
     # ----------------------------------------------------------
-    'video_duration': 10,     # Seconds per video
+    'video_duration': 15,     # Seconds per video
     'fps': 30,                # Frames per second
     'burnin_steps': 200,      # Steps before recording starts
     'window_width': 600,      # Pygame window width (pixels)
