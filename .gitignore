@@ -8,6 +8,7 @@ CLAUDE.md
 VIDEO_README.md
 particle_life_research.md
 characterization/results/
+behavior_reproduction/results/
 
 # C extensions
 *.so
