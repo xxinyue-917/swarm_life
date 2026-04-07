@@ -103,7 +103,15 @@ def plot_single_heatmap(df, metric, ax, cmap='viridis', label='', krot_case=None
 
 
 def main():
-    cfg = PLOT_CONFIG
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sweep', type=str, default=None,
+                        help='Override sweep_type from PLOT_CONFIG')
+    args = parser.parse_args()
+
+    cfg = PLOT_CONFIG.copy()
+    if args.sweep:
+        cfg['sweep_type'] = args.sweep
     base = Path(__file__).parent / 'results' / 'metrics'
     csv_path = base / f"{cfg['sweep_type']}.csv"
 
