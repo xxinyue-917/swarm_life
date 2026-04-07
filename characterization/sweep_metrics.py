@@ -329,8 +329,24 @@ def generate_sweep_points(cfg):
 # ============================================================
 
 def main():
-    cfg = CONFIG
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sweep', type=str, default=None,
+                        help='Override sweep_type from CONFIG')
+    args = parser.parse_args()
+
+    cfg = CONFIG.copy()
+    if args.sweep:
+        cfg['sweep_type'] = args.sweep
     sweep_type = cfg['sweep_type']
+
+    # Set appropriate fixed values per sweep type
+    if sweep_type in ('kpos_offdiag', 'kpos_x_krot'):
+        cfg['K12'] = 0.0;  cfg['K21'] = 0.0   # these are swept
+    elif sweep_type in ('krot_offdiag', 'krot_diag', 'krot_full'):
+        cfg['K12'] = 0.3;  cfg['K21'] = 0.3   # fixed attractive
+    elif sweep_type == 'kpos_diag':
+        cfg['K12'] = 0.3;  cfg['K21'] = 0.3   # fixed cross-attraction
 
     base_dir = Path(__file__).parent / cfg['output_dir']
     base_dir.mkdir(parents=True, exist_ok=True)

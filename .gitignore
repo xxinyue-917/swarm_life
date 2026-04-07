@@ -9,6 +9,7 @@ VIDEO_README.md
 particle_life_research.md
 characterization/results/
 behavior_reproduction/results/
+behavior_reproduction/research_papers/
 
 # C extensions
 *.so

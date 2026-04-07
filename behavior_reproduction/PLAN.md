@@ -54,6 +54,7 @@ behavior_reproduction/
 ## Status
 
 - [x] Plan created
-- [ ] Microrobot collectives implementation
+- [x] Microrobot collectives — initial implementation with 6 presets
+- [ ] Microrobot collectives — tune presets to match paper figures
 - [ ] Flocking implementation
 - [ ] Comparison analysis
