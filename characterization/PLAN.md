@@ -115,9 +115,13 @@ Full space = 8 dimensions. We reduce dimensionality by fixing some entries.
 
 ```
 characterization/
-├── PLAN.md                 # This document
-├── sweep_2species.py       # Main sweep script (video + screenshot)
-├── plot_results.py         # Metrics visualization (for later)
+├── PLAN.md                     # This document
+├── sweep_2species.py           # Video + screenshot sweep
+├── sweep_metrics.py            # Headless metrics sweep (CSV output)
+├── plot_heatmaps.py            # Generate heatmaps from CSV
+├── make_grids.py               # Screenshot grid images
+├── make_slides.py              # PowerPoint with video grids
+├── make_metric_slides.py       # PowerPoint with metric heatmaps
 ├── results/
 │   ├── kpos_offdiag/       # Sweep 1
 │   │   ├── config.json

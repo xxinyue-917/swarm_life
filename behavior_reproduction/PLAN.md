@@ -69,7 +69,7 @@ For each target behavior:
 behavior_reproduction/
 ├── PLAN.md                    # This document
 ├── microrobot_collectives.py  # Microrobot behavior presets (rotation, chain, oscillation)
-├── flocking.py                # Flocking presets (future)
+├── flocking.py                # Flocking presets (separation, aggregation, cohesion)
 ├── research_papers/           # Reference PDFs (gitignored)
 ├── results/                   # Videos and screenshots (gitignored)
 └── presets/                   # Discovered parameter configurations (JSON)
@@ -98,15 +98,23 @@ behavior_reproduction/
 - Alignment is harder: particle life's K_rot creates rotation, not direct velocity matching
 - Need to explore whether symmetric K_rot coupling produces the same order-disorder phase transition as Vicsek
 
+### Flocking Implementation Notes
+- 10 species, 15 particles each (150 total), toroidal wrapping
+- Chain-structured K_pos with forward_bias creates continuous forward motion
+- Antisymmetric K_rot between adjacent species creates perpendicular translation
+- Both mechanisms are identical to the formation_locomotion demo — no physics modifications
+- **Critical rule**: compute_velocities() and step physics must remain identical to particle_life.py. All behaviors come from matrix design only.
+
 ## Status
 
 - [x] Plan created
 - [x] Microrobot rotation modes (3 presets)
 - [x] Microrobot chain mode (tridiagonal K_pos)
 - [x] Microrobot oscillation (sinusoidal K_rot)
+- [x] Flocking — separation, aggregation, cohesion, full Reynolds presets
 - [ ] Microrobot — tune presets to quantitatively match paper figures
 - [ ] Microrobot — reproduce dispersion and reconfiguration modes
-- [ ] Flocking implementation
+- [ ] Flocking — tune for more realistic boids-like motion
 - [ ] Quantitative comparison with published results
 - [ ] Slides with side-by-side comparison
 
