@@ -138,6 +138,13 @@ class FlockingDemo(ParticleLife):
         super().__init__(config, headless=False)
 
         self.hide_gui = False
+        self.show_matrix = True
+        self.matrix_edit_mode = False
+        self._tiny_font = None
+        self._tiny_font_size = 0
+        self.edit_row = 0
+        self.edit_col = 0
+        self.editing_k_rot = False  # False = K_pos, True = K_rot
         self._scatter_with_velocity()
 
         pygame.display.set_caption("Flocking — Reynolds Boids Reproduction")
@@ -201,8 +208,10 @@ class FlockingDemo(ParticleLife):
         if self.hide_gui:
             return
 
-        if self.show_info:
+        if self.show_matrix:
             self._draw_matrix_heatmap()
+
+        if self.show_info:
             self._draw_info()
         self.draw_pause_indicator()
 
@@ -220,9 +229,19 @@ class FlockingDemo(ParticleLife):
         y_kpos = 10
         y_krot = y_kpos + mat_height
 
-        for mat, label, y0 in [(self.matrix, "K_pos:", y_kpos),
-                                (self.alignment_matrix, "K_rot:", y_krot)]:
-            lbl = self.font.render(label, True, grey)
+        mats = [
+            (self.matrix, "K_pos:", y_kpos, not self.editing_k_rot),
+            (self.alignment_matrix, "K_rot:", y_krot, self.editing_k_rot),
+        ]
+
+        for mat, label, y0, is_active_edit in mats:
+            lbl_text = label
+            if self.matrix_edit_mode and is_active_edit:
+                lbl_text += " (EDIT)"
+                lbl_color = (100, 100, 200)
+            else:
+                lbl_color = grey
+            lbl = self.font.render(lbl_text, True, lbl_color)
             self.screen.blit(lbl, (x0, y0))
             y0 += 20
 
@@ -250,15 +269,22 @@ class FlockingDemo(ParticleLife):
 
                     pygame.draw.rect(self.screen, color,
                                      (x, y, cell_size - 2, cell_size - 2))
-                    pygame.draw.rect(self.screen, (160, 160, 160),
-                                     (x, y, cell_size - 2, cell_size - 2), 1)
+                    # Highlight selected cell in edit mode
+                    if self.matrix_edit_mode and is_active_edit and i == self.edit_row and j == self.edit_col:
+                        pygame.draw.rect(self.screen, (255, 255, 0),
+                                         (x, y, cell_size - 2, cell_size - 2), 2)
+                    else:
+                        pygame.draw.rect(self.screen, (160, 160, 160),
+                                         (x, y, cell_size - 2, cell_size - 2), 1)
 
-                    # Only show value text if cells are large enough
-                    if cell_size >= 25:
-                        small_font = pygame.font.Font(None, max(12, cell_size // 2))
-                        txt = small_font.render(f"{val:+.1f}", True, (255, 255, 255))
-                        tr = txt.get_rect(center=(x + cell_size // 2 - 1, y + cell_size // 2 - 1))
-                        self.screen.blit(txt, tr)
+                    # Cached tiny font scaled to cell size
+                    font_size = max(7, cell_size - 8)
+                    if self._tiny_font is None or self._tiny_font_size != font_size:
+                        self._tiny_font = pygame.font.Font(None, font_size)
+                        self._tiny_font_size = font_size
+                    txt = self._tiny_font.render(f"{val:.1f}", True, (255, 255, 255))
+                    tr = txt.get_rect(center=(x + cell_size // 2 - 1, y + cell_size // 2 - 1))
+                    self.screen.blit(txt, tr)
                 y0 += cell_size
 
     def _draw_info(self):
@@ -273,6 +299,8 @@ class FlockingDemo(ParticleLife):
             "1: Separation  2: Aggregation",
             "3: Cohesion    4: Full Reynolds",
             "Up/Dn: K_pos cross  L/R: K_rot",
+            "V: Show matrix  M: Edit matrix",
+            "TAB: switch  WASD: nav  E/X: +/-",
             "B: Beta  R: Reset",
         ]
         y = 10
@@ -311,6 +339,8 @@ class FlockingDemo(ParticleLife):
                     self.show_info = not self.show_info
                 elif event.key == pygame.K_h:
                     self.hide_gui = not self.hide_gui
+                elif event.key == pygame.K_v:
+                    self.show_matrix = not self.show_matrix
 
                 # Presets
                 elif event.key == pygame.K_1:
@@ -321,6 +351,31 @@ class FlockingDemo(ParticleLife):
                     self._load_preset('3_cohesion')
                 elif event.key == pygame.K_4:
                     self._load_preset('4_full_reynolds')
+
+                # Matrix editing
+                elif event.key == pygame.K_m:
+                    self.matrix_edit_mode = not self.matrix_edit_mode
+                    print(f"Matrix edit: {'ON' if self.matrix_edit_mode else 'OFF'}")
+                elif event.key == pygame.K_TAB and self.matrix_edit_mode:
+                    self.editing_k_rot = not self.editing_k_rot
+                    print(f"Editing: {'K_rot' if self.editing_k_rot else 'K_pos'}")
+                elif self.matrix_edit_mode:
+                    if event.key == pygame.K_w:
+                        self.edit_row = max(0, self.edit_row - 1)
+                    elif event.key == pygame.K_s:
+                        self.edit_row = min(N_SPECIES - 1, self.edit_row + 1)
+                    elif event.key == pygame.K_a:
+                        self.edit_col = max(0, self.edit_col - 1)
+                    elif event.key == pygame.K_d:
+                        self.edit_col = min(N_SPECIES - 1, self.edit_col + 1)
+                    elif event.key in (pygame.K_e, pygame.K_EQUALS):
+                        mat = self.alignment_matrix if self.editing_k_rot else self.matrix
+                        mat[self.edit_row, self.edit_col] = min(1.0, mat[self.edit_row, self.edit_col] + 0.1)
+                        print(f"[{self.edit_row},{self.edit_col}] = {mat[self.edit_row, self.edit_col]:.2f}")
+                    elif event.key in (pygame.K_x, pygame.K_MINUS):
+                        mat = self.alignment_matrix if self.editing_k_rot else self.matrix
+                        mat[self.edit_row, self.edit_col] = max(-1.0, mat[self.edit_row, self.edit_col] - 0.1)
+                        print(f"[{self.edit_row},{self.edit_col}] = {mat[self.edit_row, self.edit_col]:.2f}")
 
                 # Tuning — adjust off-diagonal K_pos uniformly
                 elif event.key == pygame.K_UP:
@@ -348,6 +403,15 @@ class FlockingDemo(ParticleLife):
                 elif event.key == pygame.K_b:
                     self.config.beta = min(0.8, self.config.beta + 0.05)
                     print(f"Beta: {self.config.beta:.2f}")
+
+        # Held keys — continuous matrix editing
+        if self.matrix_edit_mode:
+            keys = pygame.key.get_pressed()
+            mat = self.alignment_matrix if self.editing_k_rot else self.matrix
+            if keys[pygame.K_e] or keys[pygame.K_EQUALS]:
+                mat[self.edit_row, self.edit_col] = min(1.0, mat[self.edit_row, self.edit_col] + 0.02)
+            if keys[pygame.K_x] or keys[pygame.K_MINUS]:
+                mat[self.edit_row, self.edit_col] = max(-1.0, mat[self.edit_row, self.edit_col] - 0.02)
 
         return True
 

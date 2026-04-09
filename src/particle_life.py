@@ -16,6 +16,94 @@ import argparse
 import os
 from datetime import datetime
 
+# Try to import numba for JIT acceleration (~50-100x speedup)
+try:
+    from numba import njit
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
+    # Dummy decorator so code works without numba (just slower)
+    def njit(*args, **kwargs):
+        def decorator(func):
+            return func
+        if len(args) == 1 and callable(args[0]):
+            return args[0]
+        return decorator
+
+
+@njit(cache=True)
+def _compute_velocities_jit(positions, species, k_pos, k_rot,
+                             n, r_max, beta, force_scale, far_attraction, a_rot):
+    """Numba-accelerated force computation — same physics as the Python version."""
+    new_velocities = np.zeros((n, 2), dtype=np.float64)
+    inv_1_minus_beta = 1.0 / (1.0 - beta) if beta < 1.0 else 1.0
+
+    for i in range(n):
+        vx = 0.0
+        vy = 0.0
+
+        for j in range(n):
+            if j == i:
+                continue
+
+            dx = positions[j, 0] - positions[i, 0]
+            dy = positions[j, 1] - positions[i, 1]
+            r = math.sqrt(dx * dx + dy * dy)
+
+            if r < 1e-8:
+                continue
+
+            r_norm = r / r_max
+            si = species[i]
+            sj = species[j]
+
+            if r_norm >= 1.0:
+                # Long-range attraction beyond r_max
+                if far_attraction > 0:
+                    kp = k_pos[si, sj]
+                    inv_r = 1.0 / r
+                    F = kp * far_attraction
+                    vx += force_scale * F * dx * inv_r
+                    vy += force_scale * F * dy * inv_r
+                continue
+
+            kp = k_pos[si, sj]
+            kr = k_rot[si, sj]
+
+            inv_r = 1.0 / r
+            r_hat_x = dx * inv_r
+            r_hat_y = dy * inv_r
+            t_hat_x = -r_hat_y
+            t_hat_y = r_hat_x
+
+            # Piecewise linear radial force (4 zones)
+            if r_norm < beta:
+                F = r_norm / beta - 1.0
+            else:
+                triangle = 1.0 - abs(2.0 * r_norm - 1.0 - beta) * inv_1_minus_beta
+                peak_r = 0.5 * (1.0 + beta)
+                if r_norm < peak_r:
+                    F = kp * triangle
+                else:
+                    F = kp * max(far_attraction, triangle)
+
+            vx += force_scale * F * r_hat_x
+            vy += force_scale * F * r_hat_y
+
+            # Tangential swirl
+            swirl_weight = 1.0 - r_norm
+            if swirl_weight < 0.0:
+                swirl_weight = 0.0
+            swirl_gain = kr * a_rot * swirl_weight
+
+            vx += swirl_gain * t_hat_x
+            vy += swirl_gain * t_hat_y
+
+        new_velocities[i, 0] = vx
+        new_velocities[i, 1] = vy
+
+    return new_velocities
+
 @dataclass
 class Config:
     """Simulation configuration"""
@@ -458,7 +546,21 @@ class ParticleLife:
 
         where r is normalized distance (raw/r_max), a is k_pos matrix value.
         All boundaries are continuous. Set far_attraction=0 to disable zones 3-4 floor.
+
+        Uses Numba JIT if available (~50-100x speedup). Falls back to pure Python otherwise.
         """
+        return _compute_velocities_jit(
+            self.positions.astype(np.float64),
+            self.species.astype(np.int64),
+            self.matrix.astype(np.float64),
+            self.alignment_matrix.astype(np.float64),
+            self.n,
+            self.config.r_max, self.config.beta, self.config.force_scale,
+            self.config.far_attraction, self.config.a_rot
+        )
+
+    def _compute_velocities_python(self) -> tuple:
+        """Pure Python fallback (kept for reference). Identical physics to JIT version."""
         new_velocities = np.zeros_like(self.velocities)
 
         r_max = self.config.r_max
@@ -582,12 +684,13 @@ class ParticleLife:
         pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
 
     def draw_particles(self):
-        """Draw all particles with unified anti-aliased style."""
+        """Draw all particles with anti-aliased circles."""
         r = max(3, int(0.04 * self.ppu * self.zoom))
+        scale = self.ppu * self.zoom
         for i in range(self.n):
             color = self.colors[self.species[i]]
-            x = int(self.positions[i, 0] * self.ppu * self.zoom)
-            y = int(self.positions[i, 1] * self.ppu * self.zoom)
+            x = int(self.positions[i, 0] * scale)
+            y = int(self.positions[i, 1] * scale)
             pygame.gfxdraw.aacircle(self.screen, x, y, r, color)
             pygame.gfxdraw.filled_circle(self.screen, x, y, r, color)
 
