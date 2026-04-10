@@ -114,7 +114,7 @@ behavior_reproduction/
 - [x] Flocking — separation, aggregation, cohesion, full Reynolds presets
 - [ ] Microrobot — tune presets to quantitatively match paper figures
 - [ ] Microrobot — reproduce dispersion and reconfiguration modes
-- [ ] Flocking — tune for more realistic boids-like motion
+- [ ] Flocking — tune for more realistic boids-like motion. Current issue: particles aggregate but don't show convincing flock-like collective motion (moving together in one direction). The overdamped velocity model makes sustained directional movement hard — particles settle at equilibrium rather than flying. Need to explore stronger forward_bias, higher max_speed, or different matrix structures to get persistent group motion with toroidal wrapping.
 - [ ] Quantitative comparison with published results
 - [ ] Slides with side-by-side comparison
 
