@@ -46,7 +46,7 @@ CONFIG = {
     # ----------------------------------------------------------
     # GRID
     # ----------------------------------------------------------
-    'grid_points': 11,        # 11 → [-1.0, -0.8, ..., 0.8, 1.0]
+    'grid_points': 21,        # 21 → [-1.0, -0.9, ..., 0.9, 1.0] (interval 0.1)
     'param_min': -1.0,
     'param_max':  1.0,
 
@@ -86,7 +86,7 @@ CONFIG = {
     'total_steps': 1000,      # Total simulation steps
     'measure_fraction': 0.2,  # Measure over last 20% of steps
     'sample_stride': 5,       # Sample every N steps during measurement
-    'n_seeds': 1,             # Random seeds for averaging
+    'n_seeds': 5,             # Random seeds for averaging
 
     # ----------------------------------------------------------
     # OUTPUT

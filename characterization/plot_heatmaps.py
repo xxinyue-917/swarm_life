@@ -91,6 +91,7 @@ def plot_single_heatmap(df, metric, ax, cmap='viridis', label='', krot_case=None
         grid[i, j] = float(row[metric])
 
     im = ax.imshow(grid, origin='lower', aspect='auto', cmap=cmap,
+                   interpolation='bicubic',
                    extent=[p1_vals[0], p1_vals[-1], p2_vals[0], p2_vals[-1]])
 
     ax.set_xlabel(p1_name, fontsize=11)
