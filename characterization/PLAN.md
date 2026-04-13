@@ -339,9 +339,10 @@ Total: ~20 metrics per 3-species sweep.
 - [x] Sweep 4: K_pos diagonal (25 videos)
 - [x] Sweep 5: K_rot diagonal (25 videos)
 - [x] Sweep 6: Full K_rot (625 videos, 6473s)
-- [x] Quantitative metrics sweep (headless) — all 5 sweeps, 11×11 grid
-- [x] Heatmap generation — all metrics
-- [x] Metric slides with descriptions
+- [x] Quantitative metrics sweep (headless) — all 5 sweeps, 21×21 grid, 5 seeds averaged
+- [x] Heatmap generation — all 14 metrics, bicubic interpolation
+- [x] Metric slides with descriptions and example matrices
+- [ ] **Re-run metrics with per-seed CSV** — sweep_metrics.py updated to save each seed as its own row (5 rows per parameter point with `seed` column). plot_heatmaps.py auto-averages across seeds. Enables variance analysis and error bars. Pending re-run.
 - [ ] Behavior classification
 
 ### 3-Species

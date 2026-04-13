@@ -124,6 +124,12 @@ def main():
     df = pd.read_csv(csv_path)
     print(f"Loaded {len(df)} rows from {csv_path}")
 
+    # Average across seeds if 'seed' column exists
+    if 'seed' in df.columns:
+        group_cols = ['param1_name', 'param1_val', 'param2_name', 'param2_val', 'krot_case']
+        df = df.groupby(group_cols, as_index=False)[cfg['metrics']].mean()
+        print(f"Averaged to {len(df)} points")
+
     # Output directory
     out_dir = base / cfg['sweep_type']
     out_dir.mkdir(parents=True, exist_ok=True)

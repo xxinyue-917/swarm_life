@@ -370,10 +370,10 @@ def main():
     print(f"Output:          {base_dir}")
     print("=" * 60)
 
-    # CSV
+    # CSV — one row per seed (not averaged)
     csv_path = base_dir / f'{sweep_type}.csv'
     fieldnames = ['param1_name', 'param1_val', 'param2_name', 'param2_val',
-                  'krot_case'] + METRIC_KEYS
+                  'krot_case', 'seed'] + METRIC_KEYS
 
     # Resume support
     existing = set()
@@ -381,9 +381,10 @@ def main():
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                key = (row['param1_val'], row['param2_val'], row.get('krot_case', ''))
+                key = (row['param1_val'], row['param2_val'],
+                       row.get('krot_case', ''), row.get('seed', ''))
                 existing.add(key)
-        print(f"Resuming: {len(existing)} points done")
+        print(f"Resuming: {len(existing)} rows done")
 
     write_header = not csv_path.exists() or len(existing) == 0
     csv_file = open(csv_path, 'a', newline='')
@@ -395,21 +396,25 @@ def main():
     pbar = tqdm(points, desc=f"Metrics {sweep_type}")
 
     for p1n, p1v, p2n, p2v, kcase, K_pos, K_rot in pbar:
-        key = (f"{p1v:.4f}", f"{p2v:.4f}", kcase)
-        if key in existing:
-            continue
-
         pbar.set_postfix_str(f"{p1n}={p1v:.2f} {p2n}={p2v:.2f} {kcase}")
 
         config = build_config(K_pos, K_rot, cfg)
-        result = run_averaged(config, cfg)
 
-        row = {
-            'param1_name': p1n,
-            'param1_val': f"{p1v:.4f}",
-            'param2_name': p2n,
-            'param2_val': f"{p2v:.4f}",
-            'krot_case': kcase,
+        for s in range(cfg['n_seeds']):
+            seed = 42 + s
+            key = (f"{p1v:.4f}", f"{p2v:.4f}", kcase, str(seed))
+            if key in existing:
+                continue
+
+            result = run_single(config, cfg, seed)
+
+            row = {
+                'param1_name': p1n,
+                'param1_val': f"{p1v:.4f}",
+                'param2_name': p2n,
+                'param2_val': f"{p2v:.4f}",
+                'krot_case': kcase,
+                'seed': seed,
         }
         for k in METRIC_KEYS:
             row[k] = f"{result[k]:.6f}"
