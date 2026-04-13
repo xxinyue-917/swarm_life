@@ -70,6 +70,7 @@ behavior_reproduction/
 ├── PLAN.md                    # This document
 ├── microrobot_collectives.py  # Microrobot behavior presets (rotation, chain, oscillation)
 ├── flocking.py                # Flocking presets (separation, aggregation, cohesion)
+├── galaxy.py                  # Galaxy morphology (elliptical, disk, ring, merger, differential)
 ├── research_papers/           # Reference PDFs (gitignored)
 ├── results/                   # Videos and screenshots (gitignored)
 └── presets/                   # Discovered parameter configurations (JSON)
@@ -98,6 +99,22 @@ behavior_reproduction/
 - Alignment is harder: particle life's K_rot creates rotation, not direct velocity matching
 - Need to explore whether symmetric K_rot coupling produces the same order-disorder phase transition as Vicsek
 
+### Galaxy Implementation Notes
+
+5 presets reproducing morphological analogs of galaxy phenomena:
+
+| Preset | Species | Mechanism | Galaxy analog |
+|--------|---------|-----------|---------------|
+| Elliptical | 1 (200 particles) | Self-attraction blob, no rotation | E0-E7 elliptical galaxies |
+| Rotating Disk | 2 (bulge + disk) | Antisymmetric K_rot → disk orbits bulge | Lenticular (S0) galaxy |
+| Ring Galaxy | 3 (bulge + disk + intruder) | Intruder repels disk outward → expanding ring | Cartwheel galaxy |
+| Merger | 4 (2 per galaxy) | Two rotating clusters with weak cross-attraction merge | Antennae-like collision |
+| Differential Rotation | 3 (bulge + inner + outer) | K_rot[0,1]=0.7 vs K_rot[0,2]=0.3 → inner orbits faster | Spiral galaxy rotation curve |
+
+**Honest framing**: These are topological/morphological analogs, not gravitational simulations. The model lacks inertia, angular momentum conservation, and 1/r² gravity. True spiral arms and tidal tails are not achievable. The value is showing that visually complex rotational structures emerge from simple species-species coupling matrices.
+
+**Critical rule**: compute_velocities() and step physics remain identical to particle_life.py. All behaviors come from matrix design only.
+
 ### Flocking Implementation Notes
 - 10 species, 15 particles each (150 total), toroidal wrapping
 - Chain-structured K_pos with forward_bias creates continuous forward motion
@@ -112,6 +129,7 @@ behavior_reproduction/
 - [x] Microrobot chain mode (tridiagonal K_pos)
 - [x] Microrobot oscillation (sinusoidal K_rot)
 - [x] Flocking — separation, aggregation, cohesion, full Reynolds presets
+- [x] Galaxy — elliptical, rotating disk, ring galaxy, merger, differential rotation
 - [ ] Microrobot — tune presets to quantitatively match paper figures
 - [ ] Microrobot — reproduce dispersion and reconfiguration modes
 - [ ] Flocking — tune for more realistic boids-like motion. Current issue: particles aggregate but don't show convincing flock-like collective motion (moving together in one direction). The overdamped velocity model makes sustained directional movement hard — particles settle at equilibrium rather than flying. Need to explore stronger forward_bias, higher max_speed, or different matrix structures to get persistent group motion with toroidal wrapping.
