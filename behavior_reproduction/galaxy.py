@@ -59,8 +59,8 @@ PRESETS = {
             [0.3, 0.15],
         ]),
         'K_rot': np.array([
-            [0.0,  0.6],
-            [-0.6, 0.0],
+            [0.0,  0.2],
+            [-0.2, 0.0],
         ]),
         'description': 'Bulge (S0) + disk (S1). Antisymmetric K_rot → disk orbits bulge',
         'init': 'disk',
@@ -75,8 +75,8 @@ PRESETS = {
             [0.4,  0.0,  0.8],   # Intruder: attracted to bulge, self-cohesion
         ]),
         'K_rot': np.array([
-            [0.0,  0.4,  0.0],
-            [-0.4, 0.0,  0.0],
+            [0.0,  0.15, 0.0],
+            [-0.15,0.0,  0.0],
             [0.0,  0.0,  0.0],
         ]),
         'description': 'Intruder (S2) passes through disk → repulsion creates expanding ring',
@@ -96,10 +96,10 @@ PRESETS = {
         ]),
         'K_rot': np.array([
             # Intra-galaxy rotation, no cross-galaxy rotation
-            [0.0,  0.5,  0.0,  0.0],
-            [-0.5, 0.0,  0.0,  0.0],
-            [0.0,  0.0,  0.0,  0.5],
-            [0.0,  0.0, -0.5,  0.0],
+            [0.0,  0.15, 0.0,  0.0],
+            [-0.15,0.0,  0.0,  0.0],
+            [0.0,  0.0,  0.0,  0.15],
+            [0.0,  0.0, -0.15, 0.0],
         ]),
         'description': 'Two rotating galaxies (A: S0+S1, B: S2+S3) merge via weak cross-attraction',
         'init': 'two_galaxies',
@@ -114,9 +114,9 @@ PRESETS = {
             [0.15, 0.1, 0.1],   # Outer disk
         ]),
         'K_rot': np.array([
-            [0.0,  0.7,  0.3],   # Bulge drives inner fast, outer slow
-            [-0.7, 0.0,  0.0],
-            [-0.3, 0.0,  0.0],
+            [0.0,  0.25, 0.1],   # Bulge drives inner fast, outer slow
+            [-0.25,0.0,  0.0],
+            [-0.1, 0.0,  0.0],
         ]),
         'description': 'Inner disk orbits faster than outer → differential rotation',
         'init': 'disk_3species',
@@ -145,7 +145,7 @@ class GalaxyDemo(ParticleLife):
             beta=0.3,
             force_scale=0.5,
             max_speed=1.5,
-            a_rot=2.0,
+            a_rot=0.5,
             far_attraction=0.05,
             position_matrix=preset['K_pos'].tolist(),
             orientation_matrix=preset['K_rot'].tolist(),
