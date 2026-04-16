@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 .vscode/
 .DS_Store
-CLAUDE.md
 VIDEO_README.md
 particle_life_research.md
 characterization/results/
