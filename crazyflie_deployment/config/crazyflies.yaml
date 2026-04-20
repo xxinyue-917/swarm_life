@@ -1,0 +1,64 @@
+# Crazyflie drone configuration
+# Each drone needs: unique URI (radio://), species assignment, Vicon rigid body name
+
+# Two Crazyradio PAs: radio 0 (drones 1-5), radio 1 (drones 6-10)
+# Channels and addresses must be unique per radio
+
+drones:
+  cf1:
+    uri: "radio://0/80/2M/E7E7E7E701"
+    species: 0
+    vicon_name: "cf1"    # Rigid body name in Vicon Tracker
+  cf2:
+    uri: "radio://0/80/2M/E7E7E7E702"
+    species: 0
+    vicon_name: "cf2"
+  cf3:
+    uri: "radio://0/80/2M/E7E7E7E703"
+    species: 0
+    vicon_name: "cf3"
+  cf4:
+    uri: "radio://0/80/2M/E7E7E7E704"
+    species: 0
+    vicon_name: "cf4"
+  cf5:
+    uri: "radio://0/80/2M/E7E7E7E705"
+    species: 0
+    vicon_name: "cf5"
+  cf6:
+    uri: "radio://1/90/2M/E7E7E7E706"
+    species: 1
+    vicon_name: "cf6"
+  cf7:
+    uri: "radio://1/90/2M/E7E7E7E707"
+    species: 1
+    vicon_name: "cf7"
+  cf8:
+    uri: "radio://1/90/2M/E7E7E7E708"
+    species: 1
+    vicon_name: "cf8"
+  cf9:
+    uri: "radio://1/90/2M/E7E7E7E709"
+    species: 1
+    vicon_name: "cf9"
+  cf10:
+    uri: "radio://1/90/2M/E7E7E7E70A"
+    species: 1
+    vicon_name: "cf10"
+
+# Species configurations for quick switching
+# Change species assignments above to match the desired preset
+species_configs:
+  two_species_5_5:
+    description: "5+5 split for chase, encapsulate, move_together"
+    assignment: {cf1: 0, cf2: 0, cf3: 0, cf4: 0, cf5: 0,
+                 cf6: 1, cf7: 1, cf8: 1, cf9: 1, cf10: 1}
+  two_species_3_7:
+    description: "3+7 for sun-earth (3=sun, 7=planet)"
+    assignment: {cf1: 0, cf2: 0, cf3: 0,
+                 cf4: 1, cf5: 1, cf6: 1, cf7: 1, cf8: 1, cf9: 1, cf10: 1}
+  three_species:
+    description: "3+3+4 for cyclic chase"
+    assignment: {cf1: 0, cf2: 0, cf3: 0,
+                 cf4: 1, cf5: 1, cf6: 1,
+                 cf7: 2, cf8: 2, cf9: 2, cf10: 2}

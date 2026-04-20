@@ -1,0 +1,56 @@
+# Arena configuration for particle life on Crazyflie swarm
+# All units in meters unless noted
+
+arena:
+  # Physical arena dimensions (Vicon-tracked volume)
+  width: 3.0     # meters, X axis
+  height: 3.0    # meters, Y axis
+  altitude: 1.0  # meters, fixed flight altitude (Z)
+
+  # Vicon lab frame origin (subtracted from Vicon positions)
+  # Set this to the center of your arena in Vicon coordinates
+  origin_x: 0.0
+  origin_y: 0.0
+
+  # Mapping to particle life simulation coordinates
+  sim_width: 10.0    # simulation units (matches particle_life.py defaults)
+  sim_height: 10.0
+  # ARENA_TO_SIM_SCALE = sim_width / arena_width = 10.0 / 3.0 = 3.333
+
+safety:
+  # Geofence: hard boundaries 20cm inside physical walls
+  geofence_margin: 0.2  # meters
+  # Effective geofence: arena width/height minus 2 × margin
+
+  # Minimum separation between any two drones
+  min_separation: 0.30  # meters (Crazyflie wingspan ~9cm, add margin for prop wash)
+
+  # Vicon watchdog
+  pose_stale_hover: 0.15   # seconds — zero velocity if pose older than this
+  pose_stale_land: 0.50    # seconds — emergency land if pose older than this
+
+  # Radio quality
+  radio_quality_land: 60   # percent — land drone if link quality below this
+
+  # Speed limits
+  v_max_initial: 0.2       # m/s — starting speed clamp
+  v_max_final: 0.5         # m/s — maximum after stability confirmed
+
+  # Flight time management
+  low_battery_voltage: 3.0  # volts per cell — trigger landing
+
+control:
+  # Control loop rate
+  rate_hz: 30
+
+  # Force output scaling
+  # Converts simulation force units to physical m/s
+  # Start conservative, increase until motion is visible but not violent
+  force_output_scale: 0.1
+
+  # Particle life physics parameters (may differ from simulation for physical stability)
+  r_max: 2.0        # meters — interaction range in physical space
+  beta: 0.2         # repulsion zone ratio
+  force_scale: 0.5
+  far_attraction: 0.05
+  a_rot: 0.5
