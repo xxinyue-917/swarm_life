@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-Flocking Behavior Reproduction — Reynolds Boids via Particle Life
+Flocking Behavior Reproduction — Boids Aggregation via Per-Agent Chase Network
 
-Reproduce the three classic Reynolds flocking rules using only K_pos and K_rot:
-1. Separation — avoid crowding neighbors (Zone 1 repulsion)
-2. Aggregation — steer toward neighbors (K_pos positive attraction)
-3. Cohesion — combined flocking with velocity alignment (K_rot coupling)
+Reproduce Reynolds-boids-style aggregation using 1 particle per species and
+50 species. Each K_pos row encodes WHICH specific agents that agent chases.
+The chase-network topology IS the behavior.
 
-The workspace uses toroidal wrapping (no walls — particles wrap around edges).
+Design: each agent chases k=5 targets spread uniformly across the population
+(offsets N/k, 2N/k, ..., (k-1)N/k mod N). This makes the graph k-regular in
+both directions — every agent has k targets AND is chased by k others. Every
+agent experiences k inward-pulling forces from different directions, which
+balance near the population centroid → cohesive aggregated flock, matching
+Reynolds' aggregation rule.
 
-Reference: Craig W. Reynolds, "Flocks, Herds, and Schools: A Distributed
-Behavioral Model" (SIGGRAPH 1987)
+Workspace uses toroidal wrapping.
+
+Reference: Craig W. Reynolds, "Flocks, Herds, and Schools" (SIGGRAPH 1987)
 
 Controls:
-    1:     Separation only (repulsion, particles spread out)
-    2:     Aggregation only (attraction, particles cluster)
-    3:     Cohesion / flocking (attraction + alignment via K_rot)
-    4:     Cohesion + separation (full Reynolds-like behavior)
-    ↑/↓:   Adjust K_pos (attraction strength)
-    ←/→:   Adjust K_rot (alignment / rotation strength)
-    B:     Adjust beta (repulsion zone size)
     R:     Reset (random positions and velocities)
     I:     Toggle info
+    V:     Toggle matrix display
+    M:     Matrix edit mode (WASD navigate, E/X adjust)
+    ↑/↓:   Scale nonzero K_pos entries
+    B:     Adjust beta (repulsion zone size)
     SPACE: Pause
     Q:     Quit
 """
@@ -36,74 +38,78 @@ from particle_life import Config, ParticleLife
 
 
 # ============================================================
-# PRESETS
+# BOIDS AGGREGATION NETWORK
 # ============================================================
 
-N_SPECIES = 10
-N_PARTICLES_PER = 15  # 150 total
+N_SPECIES = 50        # 50 species, 1 agent each
+N_PARTICLES = 1
+K_TARGETS = 5         # each agent chases k targets spread across population
 
 
-def make_kpos_chain(diag, adjacent, forward_bias=0.0):
-    """Build chain K_pos: diagonal + adjacent attraction with forward bias.
+def make_aggregation_network(n, k=5, cohesion=0.4, flow=1.0, flow_reach=3):
+    """Asymmetric chase network — produces cohesive flock WITH directional drift.
 
-    Same mechanism as snake_demo: asymmetric K_pos creates drift along chain.
-    K[i, i-1] = adjacent (strong, toward tail)
-    K[i, i+1] = adjacent - forward_bias (weaker, toward head)
-    → net drift toward head = continuous forward motion.
+    Two channels in ONE K_pos matrix:
+
+      1. Cohesion (symmetric, weak): every agent has k chase targets at offsets
+         round(m·N/(k+1)) mod N for m=1..k. Distributed inward pulls from all
+         directions → keeps the flock clumped.
+
+      2. Flow (asymmetric, strong): every agent strongly chases the next few
+         agents in id-space (offsets +1, +2, ..., +flow_reach) — but NOT the
+         ones behind (offsets -1, -2, ...). This breaks symmetry.
+
+    Why this produces coherent drift:
+      - Each agent i is pulled toward agents (i+1)..(i+flow_reach)
+      - Agent i is pulled BY agents (i-1)..(i-flow_reach), but those forces
+        act on i-1..i-flow_reach, not on i. So i feels net force only from
+        its forward targets.
+      - As the flock moves, agent 0's position becomes "wherever agent 1 is"
+        becomes "wherever agent 2 is"... creating a traveling wave through
+        id-space that manifests as coherent flock motion in real space.
+
+    Same mechanism as snake_demo.py's `make_kpos_chain(forward_bias=...)`,
+    but extended over a chase graph of 50 agents instead of 10.
     """
-    K = np.zeros((N_SPECIES, N_SPECIES))
-    for i in range(N_SPECIES):
-        K[i, i] = diag
-        if i > 0:
-            K[i, i - 1] = adjacent  # toward tail (strong)
-        if i < N_SPECIES - 1:
-            K[i, i + 1] = adjacent - forward_bias  # toward head (weaker)
+    K = np.zeros((n, n))
+
+    # Channel 1: weak symmetric cohesion
+    offsets = [round(m * n / (k + 1)) for m in range(1, k + 1)]
+    offsets = sorted(set(o % n for o in offsets if o % n != 0))
+    for i in range(n):
+        for d in offsets:
+            j = (i + d) % n
+            K[i, j] = cohesion
+
+    # Channel 2: strong ASYMMETRIC forward chase — each agent pulled toward
+    # the next few ids only. Overwrites cohesion at those edges with a higher value.
+    # Use linearly decreasing strength so nearest forward neighbor pulls hardest.
+    for i in range(n):
+        for d in range(1, flow_reach + 1):
+            j = (i + d) % n
+            # Strongest pull at d=1, linearly decreasing
+            K[i, j] = flow * (1.0 - (d - 1) / flow_reach)
+
     return K
 
 
-def make_krot_antisymmetric(strength):
-    """Antisymmetric K_rot between adjacent species → forward translation."""
-    K = np.zeros((N_SPECIES, N_SPECIES))
-    for i in range(N_SPECIES - 1):
-        K[i, i + 1] = +strength
-        K[i + 1, i] = -strength
-    return K
-
-
-PRESETS = {
-    '1_separation': {
-        'name': 'Separation',
-        'K_pos': make_kpos_chain(diag=0.4, adjacent=-0.1, forward_bias=0.0),
-        'K_rot': np.zeros((N_SPECIES, N_SPECIES)),
-        'beta': 0.5,
-        'force_scale': 1.0,
-        'description': 'Repulsion between species — groups spread apart',
-    },
-    '2_aggregation': {
-        'name': 'Aggregation',
-        'K_pos': make_kpos_chain(diag=0.5, adjacent=0.3, forward_bias=0.0),
-        'K_rot': np.zeros((N_SPECIES, N_SPECIES)),
-        'beta': 0.2,
-        'force_scale': 0.5,
-        'description': 'Attraction between adjacent species — groups merge',
-    },
-    '3_cohesion': {
-        'name': 'Cohesion (flocking)',
-        'K_pos': make_kpos_chain(diag=0.5, adjacent=0.3, forward_bias=0.1),
-        'K_rot': make_krot_antisymmetric(0.3),
-        'beta': 0.3,
-        'force_scale': 0.5,
-        'description': 'Forward bias K_pos + antisymmetric K_rot — collective motion',
-    },
-    '4_full_reynolds': {
-        'name': 'Full Reynolds',
-        'K_pos': make_kpos_chain(diag=0.5, adjacent=0.2, forward_bias=0.1),
-        'K_rot': make_krot_antisymmetric(0.3),
-        'beta': 0.4,
-        'force_scale': 0.8,
-        'description': 'Separation + cohesion + two-channel locomotion',
-    },
+PRESET = {
+    'name': 'Boids Aggregation + Flow',
+    'K_pos': make_aggregation_network(N_SPECIES, K_TARGETS, cohesion=0.6, flow=0.0, flow_reach=1),
+    'K_rot': np.zeros((N_SPECIES, N_SPECIES)),
+    'beta': 0.12,
+    'force_scale': 1.0,
+    'description': (
+        f'{N_SPECIES} agents. K_pos k={K_TARGETS} symmetric chase network → cohesive aggregation. '
+        'Intrinsic forward drift (like real boids) gives the flock a coherent direction.'
+    ),
 }
+
+# Intrinsic per-agent forward speed (like Reynolds boids and Vicsek particles).
+# This is a post-force VELOCITY term, not a physics modification — each agent
+# has its own preferred forward direction (set at init from random angles) and
+# cruises at this speed in addition to whatever forces pull it.
+INTRINSIC_SPEED = 0.6
 
 
 # ============================================================
@@ -111,28 +117,26 @@ PRESETS = {
 # ============================================================
 
 class FlockingDemo(ParticleLife):
-    """Reproduce Reynolds flocking using particle life with toroidal wrapping."""
+    """Boids aggregation via a per-agent k-regular chase network."""
 
     def __init__(self):
-        preset = PRESETS['1_separation']
-        self.current_preset = '1_separation'
-        self.preset_name = preset['name']
+        self.preset_name = PRESET['name']
 
         sim_w, sim_h = 15.0, 15.0
 
         config = Config(
             n_species=N_SPECIES,
-            n_particles=N_PARTICLES_PER,
+            n_particles=N_PARTICLES,
             sim_width=sim_w,
             sim_height=sim_h,
-            r_max=3.0,
-            beta=preset['beta'],
-            force_scale=preset['force_scale'],
+            r_max=8.0,   # large enough that all 5 chase targets are reachable across the swarm
+            beta=PRESET['beta'],
+            force_scale=PRESET['force_scale'],
             max_speed=2.0,
             a_rot=1.0,
             far_attraction=0.0,
-            position_matrix=preset['K_pos'].tolist(),
-            orientation_matrix=preset['K_rot'].tolist(),
+            position_matrix=PRESET['K_pos'].tolist(),
+            orientation_matrix=PRESET['K_rot'].tolist(),
         )
 
         super().__init__(config, headless=False)
@@ -144,65 +148,54 @@ class FlockingDemo(ParticleLife):
         self._tiny_font_size = 0
         self.edit_row = 0
         self.edit_col = 0
-        self.editing_k_rot = False  # False = K_pos, True = K_rot
+        self.editing_k_rot = False
         self._scatter_with_velocity()
 
-        pygame.display.set_caption("Flocking — Reynolds Boids Reproduction")
+        pygame.display.set_caption("Flocking — Boids Aggregation via Chase Network")
         self._print_help()
 
     def _scatter_with_velocity(self):
-        """Random positions and random initial velocities."""
+        """Random positions in a centered cloud. Assign each agent a persistent
+        forward heading (used by the intrinsic-drift term in step)."""
         sw, sh = self.config.sim_width, self.config.sim_height
-        self.positions[:, 0] = np.random.uniform(0, sw, self.n)
-        self.positions[:, 1] = np.random.uniform(0, sh, self.n)
-        # Random initial velocities (boids start moving)
-        angles = np.random.uniform(0, 2 * np.pi, self.n)
-        speed = 0.5
-        self.velocities[:, 0] = speed * np.cos(angles)
-        self.velocities[:, 1] = speed * np.sin(angles)
-
-    def _load_preset(self, key):
-        if key not in PRESETS:
-            return
-        preset = PRESETS[key]
-        self.current_preset = key
-        self.preset_name = preset['name']
-
-        self.matrix[:] = preset['K_pos']
-        self.alignment_matrix[:] = preset['K_rot']
-        self.config.beta = preset['beta']
-        self.config.force_scale = preset['force_scale']
-
-        print(f"Preset: {preset['name']} — {preset['description']}")
+        cloud_size = min(sw, sh) * 0.3
+        cx, cy = sw / 2, sh / 2
+        self.positions[:, 0] = np.random.uniform(cx - cloud_size, cx + cloud_size, self.n)
+        self.positions[:, 1] = np.random.uniform(cy - cloud_size, cy + cloud_size, self.n)
+        # Pick ONE shared heading for all agents — they'll drift as a coherent flock
+        # in a random direction each reset. K_pos cohesion holds them together.
+        shared_angle = np.random.uniform(0, 2 * np.pi)
+        self.heading = np.array([np.cos(shared_angle), np.sin(shared_angle)], dtype=np.float64)
+        self.velocities[:] = 0
 
     def step(self):
-        """Standard particle life step with toroidal wrapping."""
+        """Standard particle life step with toroidal wrapping + intrinsic boids drift."""
         if self.paused:
             return
 
-        # Same velocity computation as particle_life.py
         self.velocities = self.compute_velocities()
 
-        # Clamp speed
+        # Reynolds/Vicsek-style intrinsic forward speed: every agent has a preferred
+        # cruise velocity. Combined with K_pos cohesion (which holds the flock
+        # together), the group drifts coherently in a single direction.
+        self.velocities += INTRINSIC_SPEED * self.heading
+
         speed = np.linalg.norm(self.velocities, axis=1, keepdims=True)
+        speed_safe = np.where(speed > 1e-8, speed, 1.0)
         self.velocities = np.where(
             speed > self.config.max_speed,
-            self.velocities * self.config.max_speed / speed,
+            self.velocities * self.config.max_speed / speed_safe,
             self.velocities
         )
 
-        # Update positions
         self.positions += self.velocities * self.config.dt
 
-        # Toroidal wrapping (instead of reflection)
         sw, sh = self.config.sim_width, self.config.sim_height
         self.positions[:, 0] = self.positions[:, 0] % sw
         self.positions[:, 1] = self.positions[:, 1] % sh
 
     def draw(self):
         self.screen.fill((255, 255, 255))
-
-        # Draw particles (standard particle life circles)
         self.draw_particles()
 
         if self.hide_gui:
@@ -216,92 +209,65 @@ class FlockingDemo(ParticleLife):
         self.draw_pause_indicator()
 
     def _draw_matrix_heatmap(self):
-        """Draw K_pos and K_rot as colored matrix cells (top right)."""
+        """Draw K_pos matrix (top right). K_rot hidden (always zero here)."""
         grey = (80, 80, 80)
         n = self.n_species
-        # Scale cell size to fit — smaller for more species
-        cell_size = max(12, min(30, 300 // max(n, 1)))
+        cell_size = max(6, min(30, 300 // max(n, 1)))
         mat_width = 15 + n * cell_size + 10
         x0 = self.config.width - mat_width
 
-        # Calculate vertical positions so they don't overlap
-        mat_height = 20 + 12 + n * cell_size + 10
-        y_kpos = 10
-        y_krot = y_kpos + mat_height
+        y0 = 10
+        lbl_text = "K_pos:" + (" (EDIT)" if self.matrix_edit_mode else "")
+        lbl_color = (100, 100, 200) if self.matrix_edit_mode else grey
+        lbl = self.font.render(lbl_text, True, lbl_color)
+        self.screen.blit(lbl, (x0, y0))
+        y0 += 20
 
-        mats = [
-            (self.matrix, "K_pos:", y_kpos, not self.editing_k_rot),
-            (self.alignment_matrix, "K_rot:", y_krot, self.editing_k_rot),
-        ]
-
-        for mat, label, y0, is_active_edit in mats:
-            lbl_text = label
-            if self.matrix_edit_mode and is_active_edit:
-                lbl_text += " (EDIT)"
-                lbl_color = (100, 100, 200)
-            else:
-                lbl_color = grey
-            lbl = self.font.render(lbl_text, True, lbl_color)
-            self.screen.blit(lbl, (x0, y0))
-            y0 += 20
-
+        # Column color markers (skip for large n to save space)
+        if cell_size >= 10:
             for j in range(n):
                 cx = x0 + 15 + j * cell_size + cell_size // 2
-                pygame.draw.circle(self.screen, self.colors[j % len(self.colors)], (cx, y0), 5)
-            y0 += 12
+                pygame.draw.circle(self.screen, self.colors[j % len(self.colors)], (cx, y0), 3)
+            y0 += 8
 
-            for i in range(n):
+        mat = self.matrix
+        for i in range(n):
+            if cell_size >= 10:
                 pygame.draw.circle(self.screen, self.colors[i % len(self.colors)],
-                                   (x0 + 6, y0 + cell_size // 2), 5)
-                for j in range(n):
-                    x = x0 + 15 + j * cell_size
-                    y = y0
-                    val = mat[i, j]
+                                   (x0 + 6, y0 + cell_size // 2), 3)
+            for j in range(n):
+                x = x0 + 15 + j * cell_size
+                y = y0
+                val = mat[i, j]
 
-                    if val > 0.01:
-                        intensity = int(min(255, abs(val) * 255))
-                        color = (0, intensity, 0)
-                    elif val < -0.01:
-                        intensity = int(min(255, abs(val) * 255))
-                        color = (intensity, 0, 0)
-                    else:
-                        color = (200, 200, 200)
+                if val > 0.01:
+                    intensity = int(min(255, abs(val) * 255))
+                    color = (0, intensity, 0)
+                elif val < -0.01:
+                    intensity = int(min(255, abs(val) * 255))
+                    color = (intensity, 0, 0)
+                else:
+                    color = (220, 220, 220)
 
-                    pygame.draw.rect(self.screen, color,
-                                     (x, y, cell_size - 2, cell_size - 2))
-                    # Highlight selected cell in edit mode
-                    if self.matrix_edit_mode and is_active_edit and i == self.edit_row and j == self.edit_col:
-                        pygame.draw.rect(self.screen, (255, 255, 0),
-                                         (x, y, cell_size - 2, cell_size - 2), 2)
-                    else:
-                        pygame.draw.rect(self.screen, (160, 160, 160),
-                                         (x, y, cell_size - 2, cell_size - 2), 1)
-
-                    # Cached tiny font scaled to cell size
-                    font_size = max(7, cell_size - 8)
-                    if self._tiny_font is None or self._tiny_font_size != font_size:
-                        self._tiny_font = pygame.font.Font(None, font_size)
-                        self._tiny_font_size = font_size
-                    txt = self._tiny_font.render(f"{val:.1f}", True, (255, 255, 255))
-                    tr = txt.get_rect(center=(x + cell_size // 2 - 1, y + cell_size // 2 - 1))
-                    self.screen.blit(txt, tr)
-                y0 += cell_size
+                pygame.draw.rect(self.screen, color,
+                                 (x, y, cell_size - 1, cell_size - 1))
+                if self.matrix_edit_mode and i == self.edit_row and j == self.edit_col:
+                    pygame.draw.rect(self.screen, (255, 255, 0),
+                                     (x, y, cell_size - 1, cell_size - 1), 2)
+            y0 += cell_size
 
     def _draw_info(self):
         lines = [
             f"FPS: {int(self.clock.get_fps())}",
             f"Preset: {self.preset_name}",
-            f"Species: {N_SPECIES}  Particles: {self.n}",
-            f"K_pos diag: {self.matrix[0,0]:.2f}  off: {self.matrix[0,1]:.2f}",
-            f"K_rot max: {self.alignment_matrix.max():.2f}",
+            f"Species: {self.n_species}  Particles: {self.n}",
+            f"K_pos chase strength: {np.max(self.matrix):.2f}",
+            f"Targets per agent: {K_TARGETS}",
             f"Beta: {self.config.beta:.2f}",
             "",
-            "1: Separation  2: Aggregation",
-            "3: Cohesion    4: Full Reynolds",
-            "Up/Dn: K_pos cross  L/R: K_rot",
-            "V: Show matrix  M: Edit matrix",
-            "TAB: switch  WASD: nav  E/X: +/-",
-            "B: Beta  R: Reset",
+            "Up/Dn: scale K_pos   B: beta",
+            "V: matrix  M: edit  R: reset",
+            "TAB switches — but only K_pos is used here",
         ]
         y = 10
         for line in lines:
@@ -312,15 +278,17 @@ class FlockingDemo(ParticleLife):
 
     def _print_help(self):
         print("=" * 60)
-        print("Flocking — Reynolds Boids Reproduction")
+        print("Flocking — Boids Aggregation (k-regular chase network)")
         print("=" * 60)
-        print("  1   Separation (repulsion only)")
-        print("  2   Aggregation (attraction only)")
-        print("  3   Cohesion / flocking (attraction + alignment)")
-        print("  4   Full Reynolds (separation + cohesion + alignment)")
-        print("  ↑/↓ K_pos (attraction)")
-        print("  ←/→ K_rot (alignment)")
-        print("  R   Reset with random velocities")
+        print(f"  {N_SPECIES} species, 1 particle each, k={K_TARGETS} targets per agent")
+        print("  Targets at uniform offsets across population id-space")
+        print("  → every agent feels k inward pulls → cohesive aggregation")
+        print()
+        print("  ↑/↓ scale K_pos strength")
+        print("  B   adjust beta (repulsion zone)")
+        print("  R   reset with random positions + velocities")
+        print("  V   toggle matrix display")
+        print("  M   matrix edit mode (WASD navigate, E/X +/-)")
         print("=" * 60)
 
     def handle_events(self):
@@ -334,7 +302,12 @@ class FlockingDemo(ParticleLife):
                     self.paused = not self.paused
                 elif event.key == pygame.K_r:
                     self._scatter_with_velocity()
-                    print("Reset")
+                    print(f"Reset. Heading = ({self.heading[0]:.2f}, {self.heading[1]:.2f})")
+                elif event.key == pygame.K_n:
+                    # Pick a new drift heading without resetting positions
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    self.heading = np.array([np.cos(angle), np.sin(angle)])
+                    print(f"New heading: ({self.heading[0]:.2f}, {self.heading[1]:.2f})")
                 elif event.key == pygame.K_i:
                     self.show_info = not self.show_info
                 elif event.key == pygame.K_h:
@@ -342,64 +315,39 @@ class FlockingDemo(ParticleLife):
                 elif event.key == pygame.K_v:
                     self.show_matrix = not self.show_matrix
 
-                # Presets
-                elif event.key == pygame.K_1:
-                    self._load_preset('1_separation')
-                elif event.key == pygame.K_2:
-                    self._load_preset('2_aggregation')
-                elif event.key == pygame.K_3:
-                    self._load_preset('3_cohesion')
-                elif event.key == pygame.K_4:
-                    self._load_preset('4_full_reynolds')
-
                 # Matrix editing
                 elif event.key == pygame.K_m:
                     self.matrix_edit_mode = not self.matrix_edit_mode
                     print(f"Matrix edit: {'ON' if self.matrix_edit_mode else 'OFF'}")
-                elif event.key == pygame.K_TAB and self.matrix_edit_mode:
-                    self.editing_k_rot = not self.editing_k_rot
-                    print(f"Editing: {'K_rot' if self.editing_k_rot else 'K_pos'}")
                 elif self.matrix_edit_mode:
                     if event.key == pygame.K_w:
                         self.edit_row = max(0, self.edit_row - 1)
                     elif event.key == pygame.K_s:
-                        self.edit_row = min(N_SPECIES - 1, self.edit_row + 1)
+                        self.edit_row = min(self.n_species - 1, self.edit_row + 1)
                     elif event.key == pygame.K_a:
                         self.edit_col = max(0, self.edit_col - 1)
                     elif event.key == pygame.K_d:
-                        self.edit_col = min(N_SPECIES - 1, self.edit_col + 1)
+                        self.edit_col = min(self.n_species - 1, self.edit_col + 1)
                     elif event.key in (pygame.K_e, pygame.K_EQUALS):
-                        mat = self.alignment_matrix if self.editing_k_rot else self.matrix
-                        mat[self.edit_row, self.edit_col] = min(1.0, mat[self.edit_row, self.edit_col] + 0.1)
-                        print(f"[{self.edit_row},{self.edit_col}] = {mat[self.edit_row, self.edit_col]:.2f}")
+                        self.matrix[self.edit_row, self.edit_col] = min(
+                            1.0, self.matrix[self.edit_row, self.edit_col] + 0.1)
+                        print(f"[{self.edit_row},{self.edit_col}] = {self.matrix[self.edit_row, self.edit_col]:.2f}")
                     elif event.key in (pygame.K_x, pygame.K_MINUS):
-                        mat = self.alignment_matrix if self.editing_k_rot else self.matrix
-                        mat[self.edit_row, self.edit_col] = max(-1.0, mat[self.edit_row, self.edit_col] - 0.1)
-                        print(f"[{self.edit_row},{self.edit_col}] = {mat[self.edit_row, self.edit_col]:.2f}")
+                        self.matrix[self.edit_row, self.edit_col] = max(
+                            -1.0, self.matrix[self.edit_row, self.edit_col] - 0.1)
+                        print(f"[{self.edit_row},{self.edit_col}] = {self.matrix[self.edit_row, self.edit_col]:.2f}")
 
-                # Tuning — adjust off-diagonal K_pos uniformly
+                # Scale nonzero K_pos entries
                 elif event.key == pygame.K_UP:
-                    n = N_SPECIES
-                    for i in range(n):
-                        for j in range(n):
-                            if i != j:
-                                self.matrix[i, j] = min(1.0, self.matrix[i, j] + 0.05)
-                    print(f"K_pos off-diag: {self.matrix[0,1]:.2f}")
+                    off_diag = ~np.eye(self.n_species, dtype=bool)
+                    nonzero_mask = off_diag & (np.abs(self.matrix) > 1e-6)
+                    self.matrix[nonzero_mask] = np.clip(self.matrix[nonzero_mask] * 1.1, -1.0, 1.0)
+                    print(f"K_pos scaled up, max={np.abs(self.matrix).max():.2f}")
                 elif event.key == pygame.K_DOWN:
-                    n = N_SPECIES
-                    for i in range(n):
-                        for j in range(n):
-                            if i != j:
-                                self.matrix[i, j] = max(-1.0, self.matrix[i, j] - 0.05)
-                    print(f"K_pos off-diag: {self.matrix[0,1]:.2f}")
-                # Adjust K_rot strength (scale all nonzero entries)
-                elif event.key == pygame.K_RIGHT:
-                    self.alignment_matrix *= 1.1
-                    self.alignment_matrix = np.clip(self.alignment_matrix, -1.0, 1.0)
-                    print(f"K_rot scaled up, max={self.alignment_matrix.max():.2f}")
-                elif event.key == pygame.K_LEFT:
-                    self.alignment_matrix *= 0.9
-                    print(f"K_rot scaled down, max={self.alignment_matrix.max():.2f}")
+                    off_diag = ~np.eye(self.n_species, dtype=bool)
+                    nonzero_mask = off_diag & (np.abs(self.matrix) > 1e-6)
+                    self.matrix[nonzero_mask] = self.matrix[nonzero_mask] * 0.9
+                    print(f"K_pos scaled down, max={np.abs(self.matrix).max():.2f}")
                 elif event.key == pygame.K_b:
                     self.config.beta = min(0.8, self.config.beta + 0.05)
                     print(f"Beta: {self.config.beta:.2f}")
@@ -407,11 +355,12 @@ class FlockingDemo(ParticleLife):
         # Held keys — continuous matrix editing
         if self.matrix_edit_mode:
             keys = pygame.key.get_pressed()
-            mat = self.alignment_matrix if self.editing_k_rot else self.matrix
             if keys[pygame.K_e] or keys[pygame.K_EQUALS]:
-                mat[self.edit_row, self.edit_col] = min(1.0, mat[self.edit_row, self.edit_col] + 0.02)
+                self.matrix[self.edit_row, self.edit_col] = min(
+                    1.0, self.matrix[self.edit_row, self.edit_col] + 0.02)
             if keys[pygame.K_x] or keys[pygame.K_MINUS]:
-                mat[self.edit_row, self.edit_col] = max(-1.0, mat[self.edit_row, self.edit_col] - 0.02)
+                self.matrix[self.edit_row, self.edit_col] = max(
+                    -1.0, self.matrix[self.edit_row, self.edit_col] - 0.02)
 
         return True
 

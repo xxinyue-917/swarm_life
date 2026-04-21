@@ -38,13 +38,13 @@ All showed that complex emergent behaviors reduce to minimal local rules. Our wo
 **Mapping**:
 | Flocking rule | Particle life equivalent |
 |---|---|
-| Cohesion (move toward neighbors' center) | Positive K_pos |
+| Cohesion (move toward neighbors' center) | K_pos chase network (see below) |
 | Separation (avoid crowding) | Zone 1 short-range repulsion (built into kernel) |
-| Alignment (match neighbor velocities) | K_rot tangential coupling aligns velocities |
+| Intrinsic forward speed (Vicsek / boids) | Shared `heading` velocity added per step |
 
-**Behaviors to reproduce**:
-- [ ] Ordered flocking (aligned collective motion)
-- [ ] Disordered swarming (no alignment)
+**Behaviors reproduced**:
+- [x] Cohesive aggregation via per-agent k-regular chase network
+- [x] Directional collective motion via intrinsic drift (Reynolds/Vicsek-style)
 - [ ] Order-disorder phase transition (continuous change in order parameter)
 - [ ] Milling / rotating flock
 
@@ -141,11 +141,32 @@ behavior_reproduction/
 **Critical rule**: compute_velocities() and step physics remain identical to particle_life.py. All behaviors come from matrix design only.
 
 ### Flocking Implementation Notes
-- 10 species, 15 particles each (150 total), toroidal wrapping
-- Chain-structured K_pos with forward_bias creates continuous forward motion
-- Antisymmetric K_rot between adjacent species creates perpendicular translation
-- Both mechanisms are identical to the formation_locomotion demo — no physics modifications
-- **Critical rule**: compute_velocities() and step physics must remain identical to particle_life.py. All behaviors come from matrix design only.
+
+**Current design (2026-04-20 rewrite)**: 50 species, 1 particle per species, toroidal wrapping. Single preset: boids-like aggregation with coherent drift.
+
+**K_pos chase network (`make_aggregation_network`)**: with 1 particle per species, each K_pos row specifies which *specific* agents that agent is attracted to. The network is a **k-regular chase graph**:
+
+- `k = 5` targets per agent
+- Targets at offsets `round(m · N / (k+1)) mod N` for m = 1..k → for N=50, k=5, offsets = {8, 17, 25, 33, 42}
+- Same offset set for every row → every agent has k outgoing AND k incoming chase edges (k-regular in both directions)
+- Offsets evenly spread around the id ring → pulls come from different spatial directions once positions randomize
+- Result: for any agent on the cloud's edge, its 5 targets collectively lie toward the centroid → net inward force → cohesive aggregation
+
+Why sparse? Only 5/49 entries per row are nonzero. A dense K_pos with uniform attraction would produce similar aggregation but is trivial; the k-regular sparse design demonstrates that *structured partial connectivity* suffices for boids cohesion.
+
+**Intrinsic drift (Reynolds/Vicsek trick)**: K_pos alone produces only clumping at the centroid — in overdamped dynamics, once aggregated, forces cancel and the flock sits still. Real boids have a preferred forward speed. A single shared `heading` vector (random unit vector set at reset) is added to every agent's velocity each step:
+
+```python
+self.velocities += INTRINSIC_SPEED * self.heading
+```
+
+This is a post-force velocity term in `step()` — `compute_velocities` itself is unchanged, preserving the physics engine rule. `INTRINSIC_SPEED = 0.6`; tuning higher makes the flock faster at the cost of cohesion stability.
+
+**Config**: `r_max = 8.0` (large enough that the 5 chase targets are always reachable once the flock clumps within ~2-3 units), `beta = 0.12`, `force_scale = 1.0`, initial spawn in 30% of arena so all chase links are active at t=0.
+
+**Controls**: `R` reset + new random heading · `N` new heading without reset (watch the flock turn) · `↑/↓` scale K_pos · `B` beta · `V/I/M/H` display toggles.
+
+**Design rationale**: previous attempts with antisymmetric K_rot (as in formation_locomotion.py) failed here because species ids are randomly mapped to space — tangential K_rot forces on scrambled id-positions are directionally random and don't add coherently. The intrinsic-speed approach matches real boids/Vicsek particles and gives a clean, tunable drift direction.
 
 ### Planetary System Implementation Notes
 
@@ -218,7 +239,7 @@ This is a *morphological analog*, not gravitational simulation. The kernel has n
 - [x] Microrobot rotation modes (3 presets)
 - [x] Microrobot chain mode (tridiagonal K_pos)
 - [x] Microrobot oscillation (sinusoidal K_rot)
-- [x] Flocking — separation, aggregation, cohesion, full Reynolds presets
+- [x] Flocking — boids-like aggregation via k-regular K_pos chase network + intrinsic drift
 - [x] Galaxy — elliptical, rotating disk, ring galaxy, merger, differential rotation
 - [x] Planetary systems — Sun-Earth, Sun-Earth-Moon, Solar System, Solar+Moon, Saturn's rings (via per-pair beta)
 - [ ] Microrobot — tune presets to quantitatively match paper figures

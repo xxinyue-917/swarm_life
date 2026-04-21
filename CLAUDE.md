@@ -393,9 +393,10 @@ behavior_reproduction/
 - Oscillation — time-varying sign-flipped K_rot
 
 **Flocking** (Reynolds/Vicsek):
+- 50 species × 1 particle each — each K_pos row specifies which *specific* agents that agent chases
+- Cohesion → k-regular chase network: agent i chases 5 targets at evenly-spaced id offsets `round(m·N/(k+1)) mod N` → every agent feels 5 inward pulls from different spatial directions → cohesive aggregation
 - Separation → Zone 1 short-range repulsion (built into kernel)
-- Aggregation → K_pos positive cross-attraction
-- Cohesion → chain K_pos forward_bias + antisymmetric K_rot
+- Directional drift → shared `heading` vector added to every agent's velocity each step (Reynolds/Vicsek intrinsic-speed trick, not a K_rot matrix because scrambled id-to-space mapping makes tangential forces incoherent)
 
 **Galaxy Morphology**:
 - Elliptical → single-species self-attracting blob
@@ -418,7 +419,7 @@ behavior_reproduction/
 - [x] Microrobot rotation modes implemented
 - [x] Microrobot chain mode (tridiagonal K_pos)
 - [x] Oscillation with sinusoidal K_rot
-- [x] Flocking (separation, aggregation, cohesion presets)
+- [x] Flocking (k-regular chase network + intrinsic drift — boids-like aggregation with coherent motion)
 - [x] Galaxy (elliptical, rotating disk, ring, merger, differential rotation)
 - [x] Planetary systems (via per-pair beta, scoped physics exception in planet.py only)
 - [ ] Quantitative comparison with published results
@@ -530,6 +531,8 @@ pip install opencv-python  # For video recording
 - **Global-beta constraint on multi-orbit systems**: In the shared overdamped kernel, the stable limit cycle for any bound pair is at `r = beta × r_max`. Because `beta` is a global scalar, ALL bound pairs converge to the same radius — multi-planet systems with differentiated orbital radii cannot be reproduced by matrix design alone. `planet.py` resolves this via a scoped override that treats `beta[i,j]` as a per-pair matrix (see `behavior_reproduction/PLAN.md`). This is the ONLY file with a physics exception; the shared engine remains scalar-beta.
 - **Overdamped orbit ≠ Newtonian orbit**: Because `v = F` (no inertia), there is no angular momentum and no centripetal equilibrium. Radial force is zero only at `r_norm = beta` (stable) or `r_norm = 1` (unstable). K_rot tangential forcing produces tangential-only motion at `r_norm = beta` → the orbit is a *limit cycle*, not a Keplerian conic. K_rot controls speed/eccentricity; beta × r_max sets mean radius.
 - **Colinear-orbit degeneracy in hierarchical systems**: If Sun, Earth, Moon are initialized colinear (all on x-axis), then Earth's tangential direction from Sun and Moon's tangential direction from Earth both point +y on step 1. The Moon translates upward with Earth instead of orbiting it. Offsetting the Moon perpendicular to the Sun-Earth axis at t=0 breaks the degeneracy and makes the nested orbit visible immediately.
+- **K_pos-as-chase-graph for boids**: With 1 particle per species and N species, each K_pos row identifies which *specific* agents that agent is attracted to — the matrix literally encodes a directed chase graph. A k-regular graph (each row has k uniform-offset nonzero entries) produces boids-like aggregation: every agent feels k pulls from different spatial directions, which collectively point toward the cluster centroid. Sparse (5/49 entries per row) but uniformly distributed pulls suffice for cohesion — dense all-pairs attraction is unnecessary.
+- **Intrinsic-speed drift for flocking**: K_pos cohesion alone cannot produce directional flock motion in overdamped dynamics — once aggregated, pairwise forces cancel at the centroid. Real boids (Reynolds) and Vicsek particles have a preferred forward speed. Adding a shared `heading` vector to every agent's velocity in `step()` (not `compute_velocities`) gives coherent drift without modifying the physics engine. Antisymmetric K_rot — the analogous trick in `formation_locomotion.py` — fails here because species ids are randomly mapped to physical space, so tangential forces are directionally incoherent.
 
 ### Hypotheses to Test
 - [ ] Is there a critical K_pos threshold for chase vs encapsulate transition?
