@@ -1,62 +1,51 @@
 # Crazyswarm2-format drone config
 # Used by ros2 launch crazyflie launch.py via crazyflies_yaml_file argument
 #
-# Two Crazyradio PAs: radio 0 (cf1-cf5), radio 1 (cf6-cf10)
-# All drones start disabled — enable each one only after its Vicon rigid body
-# (matching name) is created and tracked.
+# Fleet inherited from previous Crazyswarm1 deployment:
+#   cf1-cf4 on channel 1, cf5+cf7 on channel 5, cf9 on channel 6
+#   No cf6, cf8, cf10 (gap in original numbering)
+#
+# All drones start enabled = false. Enable each drone only after:
+#   (1) battery charged and drone responds to radio scan
+#   (2) Vicon rigid body matching the name exists and is tracked
 
 fileversion: 3
 
 robots:
   cf1:
-    enabled: false
-    uri: radio://0/80/2M/E7E7E7E701
-    initial_position: [-1.0, -1.0, 0.0]
+    enabled: false   # alive (last scan 2026-05-01)
+    uri: radio://0/1/2M/E7E7E7E701
+    initial_position: [1.0, 1.0, 0.0]
     type: cf21
   cf2:
-    enabled: false
-    uri: radio://0/80/2M/E7E7E7E702
-    initial_position: [-1.0, -0.5, 0.0]
+    enabled: false   # off / dead battery
+    uri: radio://0/1/2M/E7E7E7E702
+    initial_position: [1.0, 0.0, 0.0]
     type: cf21
   cf3:
-    enabled: false
-    uri: radio://0/80/2M/E7E7E7E703
-    initial_position: [-1.0,  0.0, 0.0]
+    enabled: false   # off / dead battery
+    uri: radio://0/1/2M/E7E7E7E703
+    initial_position: [1.0, -1.0, 0.0]
     type: cf21
   cf4:
-    enabled: false
-    uri: radio://0/80/2M/E7E7E7E704
-    initial_position: [-1.0,  0.5, 0.0]
+    enabled: false   # off / dead battery
+    uri: radio://0/1/2M/E7E7E7E704
+    initial_position: [0.0, 1.0, 0.0]
     type: cf21
   cf5:
-    enabled: false
-    uri: radio://0/80/2M/E7E7E7E705
-    initial_position: [-1.0,  1.0, 0.0]
-    type: cf21
-  cf6:
-    enabled: false
-    uri: radio://1/90/2M/E7E7E7E706
-    initial_position: [ 1.0, -1.0, 0.0]
+    enabled: false   # alive (last scan 2026-05-01)
+    uri: radio://0/5/2M/E7E7E7E705
+    initial_position: [0.0, 0.0, 0.0]
     type: cf21
   cf7:
-    enabled: false
-    uri: radio://1/90/2M/E7E7E7E707
-    initial_position: [ 1.0, -0.5, 0.0]
-    type: cf21
-  cf8:
-    enabled: false
-    uri: radio://1/90/2M/E7E7E7E708
-    initial_position: [ 1.0,  0.0, 0.0]
+    enabled: false   # alive (last scan 2026-05-01)
+    uri: radio://0/5/2M/E7E7E7E707
+    initial_position: [-1.0, 1.0, 0.0]
     type: cf21
   cf9:
-    enabled: false
-    uri: radio://1/90/2M/E7E7E7E709
-    initial_position: [ 1.0,  0.5, 0.0]
-    type: cf21
-  cf10:
-    enabled: false
-    uri: radio://1/90/2M/E7E7E7E70A
-    initial_position: [ 1.0,  1.0, 0.0]
+    enabled: false   # off / dead battery
+    uri: radio://0/6/2M/E7E7E7E709
+    initial_position: [0.0, -1.0, 0.0]
     type: cf21
 
 robot_types:
