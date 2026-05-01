@@ -2,5 +2,6 @@ build/
 install/
 log/
 results/
+references/
 __pycache__/
 *.pyc

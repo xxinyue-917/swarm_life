@@ -84,6 +84,10 @@ Track your progress here. Check each box as you complete it and note any issues.
 - [ ] Video edited for paper/presentation
 - [ ] Results written up
 
+### Open TODOs
+
+- [ ] **Custom simulation frontend** — Crazyswarm2's built-in sim GUI is hard to use. Build a lightweight custom visualization that subscribes to drone poses from ROS and renders them (3D scatter, optionally reusing the swarm_life pygame aesthetic). Design doc at `SIM_DESIGN.md`.
+
 ### Issues Log
 
 Record issues as you encounter them:

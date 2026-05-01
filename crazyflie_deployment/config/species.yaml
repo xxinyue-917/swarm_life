@@ -1,0 +1,51 @@
+# Species assignments for particle_life behaviors.
+# Loaded by particle_life_node — separate from crazyflies.yaml so the
+# Crazyswarm2 schema stays clean.
+#
+# Each entry maps a drone name (matching crazyflies.yaml + Vicon rigid body)
+# to a species index. Switch presets by changing the active block.
+
+active: two_species_5_5    # which preset below to use
+
+presets:
+  two_species_5_5:
+    description: "5 + 5 split for chase, encapsulate, move_together"
+    assignments:
+      cf1: 0
+      cf2: 0
+      cf3: 0
+      cf4: 0
+      cf5: 0
+      cf6: 1
+      cf7: 1
+      cf8: 1
+      cf9: 1
+      cf10: 1
+
+  two_species_3_7:
+    description: "3 + 7 split for sun-earth (3 = sun, 7 = planet)"
+    assignments:
+      cf1: 0
+      cf2: 0
+      cf3: 0
+      cf4: 1
+      cf5: 1
+      cf6: 1
+      cf7: 1
+      cf8: 1
+      cf9: 1
+      cf10: 1
+
+  three_species:
+    description: "3 + 3 + 4 split for cyclic chase"
+    assignments:
+      cf1: 0
+      cf2: 0
+      cf3: 0
+      cf4: 1
+      cf5: 1
+      cf6: 1
+      cf7: 2
+      cf8: 2
+      cf9: 2
+      cf10: 2
