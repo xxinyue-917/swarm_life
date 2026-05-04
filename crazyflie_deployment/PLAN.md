@@ -52,7 +52,7 @@ Track your progress here. Check each box as you complete it and note any issues.
 
 ### Phase 4 — M2: Two-Drone K_pos Chase
 - [ ] 2 drones hover simultaneously (one per radio is fine)
-- [ ] `particle_life_node` scaffold running: subscribes to poses, publishes cmdVelocityWorld
+- [ ] `particle_life_node` scaffold running: subscribes to poses, drives drones via SetpointAdapter (cmdPosition on hardware, cmdFullState on sim)
 - [ ] Species assigned (drone 1 = species 0, drone 2 = species 1)
 - [ ] K_pos-only force computation running at 30 Hz (K_rot = 0)
 - [ ] `force_output_scale` tuned (start 0.1, increase until motion visible)
@@ -203,7 +203,18 @@ source install/setup.bash
 │  │                     │  sim → m/s world   │      │  │
 │  │                     └────────┬───────────┘      │  │
 │  │                              │                  │  │
-│  │                 10× cmdVelocityWorld             │  │
+│  │                     ┌────────────────────┐      │  │
+│  │                     │  Velocity → target │      │  │
+│  │                     │  pos integration   │      │  │
+│  │                     └────────┬───────────┘      │  │
+│  │                              │                  │  │
+│  │                     ┌────────────────────┐      │  │
+│  │                     │  SetpointAdapter   │      │  │
+│  │                     │  hw : cmdPosition  │      │  │
+│  │                     │  sim: cmdFullState │      │  │
+│  │                     └────────┬───────────┘      │  │
+│  │                              │                  │  │
+│  │                10× cmd (position target)        │  │
 │  └──────────────────────┬─────────────────────────┘  │
 │                         ▼                             │
 │  ┌──────────────────────────────────────────────────┐│
@@ -220,14 +231,37 @@ source install/setup.bash
         [cf1]  ...    [cf5]  ...    [cf10]
 ```
 
-## Control Mode: cmdVelocityWorld
+## Control Mode: cmdPosition (via SetpointAdapter)
 
-Crazyflie accepts velocity setpoints in **world frame** via `cmdVelocityWorld(vx, vy, vz, yaw_rate)`:
-- `vx, vy`: horizontal velocity in m/s (maps directly from particle life F_x, F_y)
-- `vz`: 0.0 (altitude held by onboard PID at fixed z)
-- `yaw_rate`: 0.0 for M1/M2; can carry K_rot heading coupling in M3
+We compute desired velocity from particle life forces, **integrate to a position target**, and stream that target via `cmdPosition(pos, yaw)`. The Crazyflie's onboard PID (running at 100+ Hz) closes the loop on position — far tighter than any feedforward we could compute from 30 Hz Vicon-derived velocities.
 
-Update rate: **30 Hz** (sufficient for particle life timescales; well within radio bandwidth for 2 radios × 5 drones).
+```
+particle_life_node (30 Hz):
+    F = K_pos · radial + K_rot · tangential        # same NumPy as simulation
+    v = F · force_output_scale                      # sim → m/s
+    target_pos = current_pos + v · dt               # integrate
+    adapter.set_target(cf, target_pos, yaw=0.0)
+
+SetpointAdapter:
+    if backend == 'sim':                            # Crazyswarm2 sim only impls cmd_full_state
+        cf.cmdFullState(pos, vel=[0,0,0], acc=[0,0,0], yaw, omega=[0,0,0])
+    else:                                            # 'cflib' or 'cpp' (real hardware)
+        cf.cmdPosition(pos, yaw=yaw)
+
+Crazyflie firmware @ 100+ Hz: onboard PID → thrust + attitude
+```
+
+**Why cmdPosition over cmdFullState (decided 2026-05-04, three-agent debate):**
+- Onboard PID at 100+ Hz tracks position better than ground-station feedforward at 30 Hz.
+- Vicon-derived velocity is differentiated from 100 Hz pose — usable but noisier than the firmware's IMU+pose-fused estimate.
+- Mellinger feedforward terms shine for aggressive aerobatics (flips, fast trajectories with known acceleration profiles); particle life is gentle drift where they hurt more than help.
+- DASC's swarmalator deployment (closest peer) uses cmdPosition. Working precedent in this lab.
+
+**Why the adapter:** Crazyswarm2's `sim` backend implements *only* `cmd_full_state` (verified in source — `cmd_position` and `cmd_velocity_world` are commented-out dead code). The 20-line adapter lets one codepath drive both sim and hardware: hardware uses cmdPosition (clean, low feedforward); sim synthesizes a cmdFullState with zero feedforward (functionally identical to position-only).
+
+**Backend detection:** read the `backend` ROS parameter (set by `crazyflie/launch.py`). Default to `'cflib'` if not set.
+
+**Update rate: 30 Hz** (well within radio bandwidth for 2 radios × 5 drones; matches force-loop timescales).
 
 ## Coordinate Frame Mapping
 
@@ -247,11 +281,15 @@ Particle Life Sim Coords (sim_width × sim_height)
     │  Force computation: v_sim = F(positions, K_pos, K_rot)
     │
     │  Back to world: vx_world = v_sim_x / ARENA_TO_SIM_SCALE × force_output_scale
+    │
+    │  Integrate to next-step position target:
+    │  target_pos = current_pos + v_world × dt    (dt = 1/30 s)
     ▼
-cmdVelocityWorld (m/s, world frame)
+cmdPosition (target_pos, yaw=0)   # hardware
+cmdFullState (target_pos, vel=0, acc=0, yaw=0, omega=0)   # sim
 ```
 
-Example: physical arena = 3m × 3m, simulation = 10 × 10 → `ARENA_TO_SIM_SCALE = 10/3 ≈ 3.33`. A sim velocity of 1.0 unit/s → 0.3 m/s in the real world. Tune `force_output_scale` to keep physical velocities in the 0.1–0.5 m/s range.
+Example: physical arena = 3m × 3m, simulation = 10 × 10 → `ARENA_TO_SIM_SCALE = 10/3 ≈ 3.33`. A sim velocity of 1.0 unit/s → 0.3 m/s in the real world. Tune `force_output_scale` to keep physical velocities in the 0.1–0.5 m/s range. The integration step (`v × dt`) keeps target_pos within ~1 cm of current_pos at 30 Hz × 0.3 m/s — well-suited to the firmware position controller.
 
 **Day-1 verification**: Move a drone by hand, confirm `/cfN/pose.position.x` increases in the expected direction. Fix any axis flips before proceeding.
 
@@ -313,7 +351,7 @@ This preserves the physical intent: "a fast-moving neighbor deflects you tangent
 |-----|------|-------------------|
 | 1 | Install ROS2 Jazzy + Crazyswarm2. Flash Crazyflie firmware. Set up udev rules for Crazyradio PA. | `cfclient` GUI connects to drone |
 | 2 | Configure Vicon rigid body (4 asymmetric markers). Test `motion_capture_tracking` node. | `ros2 topic echo /cf1/pose` shows live position |
-| 3 | Write `particle_life_node` scaffold: pose subscription, 30Hz timer, safety layer, cmdVelocityWorld publisher. Hover = constant zero velocity + altitude hold. | Drone hovers at z=1.0m for 60s |
+| 3 | Write `particle_life_node` scaffold: pose subscription, 30Hz timer, safety layer, SetpointAdapter (cmdPosition on hardware, cmdFullState on sim). Hover = static target at (x₀, y₀, 1.0m). | Drone hovers at z=1.0m for 60s |
 | 4 | Test all safety triggers: move drone to geofence boundary (lands?), cover Vicon markers (watchdog triggers?), press ESC (emergency stop?). | All 6 safety checks verified |
 
 **Common blockers**: Crazyradio udev rules not set (`sudo cp 99-crazyflie.rules /etc/udev/rules.d/`), Vicon coordinate frame flipped, onboard EKF not receiving external position (enable `motion` deck parameter).
@@ -325,7 +363,7 @@ This preserves the physical intent: "a fast-moving neighbor deflects you tangent
 | Day | Task | Success Criterion |
 |-----|------|-------------------|
 | 5 | Add second drone + second Crazyradio PA. Configure Crazyswarm2 YAML for 2 drones on separate channels. | Both drones hover simultaneously |
-| 6 | Port `_compute_velocities_jit` force kernel to the ROS2 node (N=2 version, K_rot=0). Map sim velocities to cmdVelocityWorld. | Force computation runs at 30Hz, velocities published |
+| 6 | Port `_compute_velocities_jit` force kernel to the ROS2 node (N=2 version, K_rot=0). Integrate sim velocities to position targets, drive via SetpointAdapter. | Force computation runs at 30Hz, position targets streamed |
 | 7 | Load `2_chase` preset (K_pos asymmetric: K₁₂>0, K₂₁<0). Fly with v_max=0.15 m/s. | Drone 1 pursues drone 2; drone 2 flees. Recognizable chase. |
 | 8 | Test `2_encapsulate` and `2_move_together` presets. Tune force_output_scale for stable motion. | Visually identifiable behaviors matching simulation |
 | 9 | Record rosbag of all 3 presets. Compare trajectories with simulation replay. | Rosbags saved, qualitative match confirmed |

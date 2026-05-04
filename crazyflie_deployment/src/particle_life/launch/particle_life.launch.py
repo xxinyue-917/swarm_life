@@ -24,6 +24,8 @@ def generate_launch_description():
         executable='particle_life_node',
         name='particle_life_controller',
         output='screen',
+        # Forward backend choice to the SetpointAdapter (cmdPosition vs cmdFullState).
+        additional_env={'CF_BACKEND': LaunchConfiguration('backend')},
     )
 
     return LaunchDescription([

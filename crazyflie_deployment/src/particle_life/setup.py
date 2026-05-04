@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'particle_life_node = particle_life.particle_life_node:main',
+            'viewer = particle_life.viewer:main',
         ],
     },
 )
