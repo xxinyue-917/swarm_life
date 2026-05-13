@@ -1,0 +1,48 @@
+# QoS overrides for `ros2 bag record` so it can actually subscribe to the
+# best-effort topics in this stack. Without these, bag records nothing from
+# /poses (motion_capture_tracking publishes best-effort because mocap is
+# sensor data) and nothing from the per-drone firmware pose topics.
+/poses:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/pointCloud:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cfx/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf1/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf2/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf3/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf4/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf5/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf6/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf7/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
+/cf9/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100

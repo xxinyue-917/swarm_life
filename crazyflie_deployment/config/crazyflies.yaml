@@ -21,7 +21,7 @@ robots:
   cfx:
     enabled: true
     uri: radio://0/80/2M/E7E7E7E7E7
-    initial_position: [0.0, -1.0, 0.0]   # cf9's slot — mocap-volume probe
+    initial_position: [-1.0, 1.0, 0.0]   # cf7's slot — mocap-volume probe
     type: cf21
   cf1:
     enabled: false   # alive (last scan 2026-05-01); flips on takeoff (2026-05-04)
