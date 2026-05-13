@@ -1,4 +1,8 @@
-"""Launch the particle life controller alongside the Crazyswarm2 server."""
+"""Launch the particle life controller alongside the Crazyswarm2 server.
+
+Fully portable: all config paths resolve through the `particle_life` package's
+share dir, so anyone who clones swarm_life and builds gets a working stack.
+"""
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -9,6 +13,10 @@ import os
 
 
 def generate_launch_description():
+    pl_share = get_package_share_directory('particle_life')
+    crazyflies_yaml = os.path.join(pl_share, 'config', 'crazyflies.yaml')
+    motion_capture_yaml = os.path.join(pl_share, 'config', 'motion_capture.yaml')
+
     backend_arg = DeclareLaunchArgument(
         'backend', default_value='sim',
         description="'sim' for software-in-the-loop, 'cflib' or 'cpp' for real drones")
@@ -16,7 +24,11 @@ def generate_launch_description():
     crazyflie_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('crazyflie'), 'launch', 'launch.py')),
-        launch_arguments={'backend': LaunchConfiguration('backend')}.items()
+        launch_arguments={
+            'backend': LaunchConfiguration('backend'),
+            'crazyflies_yaml_file': crazyflies_yaml,
+            'motion_capture_yaml_file': motion_capture_yaml,
+        }.items()
     )
 
     particle_life_node = Node(

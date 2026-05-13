@@ -12,10 +12,18 @@
 fileversion: 3
 
 robots:
+  # New Crazyflie (added 2026-05-12), kept under a separate name to avoid
+  # confusion with the older cf1-cf9 fleet. Factory-default address until
+  # reconfigured — verify with `cfclient` Scan and update if it differs.
+  cfx:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E7E7
+    initial_position: [0.0, 0.0, 0.0]
+    type: cf21
   cf1:
-    enabled: false   # alive (last scan 2026-05-01)
+    enabled: false   # alive (last scan 2026-05-01); flips on takeoff (2026-05-04)
     uri: radio://0/1/2M/E7E7E7E701
-    initial_position: [1.0, 1.0, 0.0]
+    initial_position: [0.0, 0.0, 0.0]
     type: cf21
   cf2:
     enabled: false   # off / dead battery
@@ -51,8 +59,15 @@ robots:
 robot_types:
   cf21:
     motion_capture:
+      # Single-marker mode: librigidbodytracker matches a single reflective
+      # marker on top of the drone against the "default_single_marker"
+      # configuration in motion_capture.yaml. Position-only (no yaw observability)
+      # — fine for hover, OK for translation, not for tasks needing yaw control.
+      # When switching back to 4 markers, set:
+      #   tracking: "vendor"  (or "librigidbodytracker")
+      #   marker:   "default"
       tracking: "librigidbodytracker"
-      marker: "default"
+      marker: "default_single_marker"
       dynamics: "default"
     big_quad: false
     battery:
@@ -66,9 +81,17 @@ all:
       enHighLevel: 1
     stabilizer:
       estimator: 2          # 2 = Kalman (required for external positioning)
-      controller: 2         # 2 = Mellinger; switch to 1 (PID) for velocity-mode
+      controller: 1         # 1 = PID (forgiving, recommended for first flight); 2 = Mellinger
     locSrv:
       extPosStdDev: 1.0e-3
       extQuatStdDev: 0.5e-1
     kalman:
       resetEstimation: 1
+  firmware_logging:
+    enabled: true
+    default_topics:
+      # Publishes /cfN/pose at the given Hz, sourced from the firmware's own
+      # state estimate (stateEstimate.x/y/z/q*). Useful for verifying the
+      # Kalman estimator has converged before takeoff.
+      pose:
+        frequency: 10
