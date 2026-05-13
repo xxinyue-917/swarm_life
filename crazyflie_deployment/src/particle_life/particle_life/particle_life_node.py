@@ -28,6 +28,7 @@ from crazyflie_py import Crazyswarm
 
 from particle_life.setpoint_adapter import SetpointAdapter
 from particle_life import force_controller
+from particle_life.flight_logger import FlightLogger
 
 
 HOVER_HEIGHT = 1.0
@@ -166,16 +167,18 @@ class ParticleLifeController:
 
     # ---------------------------------------------------------- M2/M3 force
 
-    def _read_poses_xy(self):
-        """Return current XY positions (N, 2) in the arena (Vicon) frame."""
-        xy = np.zeros((self.n, 2))
+    def _read_poses_xyz(self):
+        """Return current XYZ positions (N, 3) in the arena (Vicon) frame."""
+        xyz = np.zeros((self.n, 3))
         for i, cf in enumerate(self.cfs):
             pos = cf.position()  # numpy (3,) — sim uses internal state, hw uses Vicon
-            xy[i, 0] = pos[0]
-            xy[i, 1] = pos[1]
-        return xy
+            xyz[i] = pos[:3]
+        return xyz
 
-    def run_force_control(self, duration: float):
+    def _read_poses_xy(self):
+        return self._read_poses_xyz()[:, :2]
+
+    def run_force_control(self, duration: float, logger: 'FlightLogger | None' = None):
         """Force-driven control loop — the M2/M3 default."""
         v_max = float(self.safety['v_max_initial'])
         force_output_scale = float(self.control_cfg['force_output_scale'])
@@ -196,7 +199,8 @@ class ParticleLifeController:
 
         print(f"[particle_life] force control running for {duration:.1f}s @ {STREAM_HZ} Hz")
         for tick in range(n_ticks):
-            poses = self._read_poses_xy()
+            poses_xyz = self._read_poses_xyz()
+            poses = poses_xyz[:, :2]
 
             v = force_controller.compute_velocities(
                 poses, self.species, self.k_pos, self.k_rot, physics_params)
@@ -210,27 +214,35 @@ class ParticleLifeController:
             targets_xy = force_controller.geofence_clip(
                 targets_xy, arena_w, arena_h, geofence_margin, origin)
 
+            targets_xyz = np.column_stack([targets_xy, np.full(self.n, HOVER_HEIGHT)])
             for i, cf in enumerate(self.cfs):
                 self.adapter.set_target(
-                    cf,
-                    (targets_xy[i, 0], targets_xy[i, 1], HOVER_HEIGHT),
-                    yaw=0.0,
-                )
+                    cf, tuple(targets_xyz[i]), yaw=0.0)
+
+            if logger is not None:
+                logger.log_tick(tick, poses, poses_xyz[:, 2], targets_xyz, v)
             self.timeHelper.sleep(period)
 
     # ---------------------------------------------------------------- driver
 
-    def run(self, mode: str, duration: float):
+    def run(self, mode: str, duration: float, log: bool = True, run_tag: str = None):
+        logger = None
+        if log:
+            drone_names = [self._cf_name(cf, i) for i, cf in enumerate(self.cfs)]
+            logger = FlightLogger(drone_names, self.species,
+                                  run_tag=run_tag or mode)
         try:
             self.takeoff()
             if mode == 'hover':
-                self.hover(duration)
+                self.hover(duration)  # not logged for now — M1 scaffold only
             else:
-                self.run_force_control(duration)
+                self.run_force_control(duration, logger=logger)
         except KeyboardInterrupt:
             print("[particle_life] interrupted, landing")
         finally:
             self.land()
+            if logger is not None:
+                logger.close()
 
 
 def main():
@@ -241,10 +253,14 @@ def main():
                         help='hover = M1 static targets; force = M2/M3 K_pos+K_rot loop')
     parser.add_argument('--duration', type=float, default=RUN_DURATION,
                         help='seconds of flight after takeoff')
+    parser.add_argument('--no-log', action='store_true',
+                        help='disable CSV pose logging')
+    parser.add_argument('--tag', default=None,
+                        help='extra suffix on the log filename for identification')
     args, _ = parser.parse_known_args(user_argv)
 
     ctrl = ParticleLifeController()
-    ctrl.run(args.mode, args.duration)
+    ctrl.run(args.mode, args.duration, log=not args.no_log, run_tag=args.tag)
 
 
 if __name__ == '__main__':
