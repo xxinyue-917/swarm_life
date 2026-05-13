@@ -29,7 +29,10 @@ setup(
             'particle_life_node = particle_life.particle_life_node:main',
             'viewer = particle_life.viewer:main',
             'flight_test = particle_life.flight_test:main',
+            'flight_test_all = particle_life.flight_test_all:main',
             'hover_test = particle_life.hover_test:main',
+            'hover_all = particle_life.hover_all:main',
+            'hover_one = particle_life.hover_one:main',
         ],
     },
 )

@@ -15,18 +15,21 @@ robots:
   # New Crazyflie (added 2026-05-12), kept under a separate name to avoid
   # confusion with the older cf1-cf9 fleet. Factory-default address until
   # reconfigured — verify with `cfclient` Scan and update if it differs.
+  # Dongle assignment (cflib URIs are 0-indexed): cf1-3 → dongle 0, cf4-6 → dongle 1,
+  # cf7-9 → dongle 2. cfx kept on dongle 0 (factory ch80, used standalone). Plug the
+  # 3 Crazyradios in the order you want them numbered — USB enumeration sets the index.
   cfx:
     enabled: true
     uri: radio://0/80/2M/E7E7E7E7E7
-    initial_position: [0.0, 0.0, 0.0]
+    initial_position: [0.0, -1.0, 0.0]   # cf9's slot — mocap-volume probe
     type: cf21
   cf1:
     enabled: false   # alive (last scan 2026-05-01); flips on takeoff (2026-05-04)
     uri: radio://0/1/2M/E7E7E7E701
-    initial_position: [0.0, 0.0, 0.0]
+    initial_position: [1.0, 1.0, 0.0]
     type: cf21
   cf2:
-    enabled: false   # off / dead battery
+    enabled: false   # active (cf1/cf2/cf4 3-drone test 2026-05-13)
     uri: radio://0/1/2M/E7E7E7E702
     initial_position: [1.0, 0.0, 0.0]
     type: cf21
@@ -36,23 +39,28 @@ robots:
     initial_position: [1.0, -1.0, 0.0]
     type: cf21
   cf4:
-    enabled: false   # off / dead battery
-    uri: radio://0/1/2M/E7E7E7E704
+    enabled: false   # active (cf1/cf2/cf4 3-drone test 2026-05-13)
+    uri: radio://1/1/2M/E7E7E7E704
     initial_position: [0.0, 1.0, 0.0]
     type: cf21
   cf5:
     enabled: false   # alive (last scan 2026-05-01)
-    uri: radio://0/5/2M/E7E7E7E705
+    uri: radio://1/5/2M/E7E7E7E705
     initial_position: [0.0, 0.0, 0.0]
+    type: cf21
+  cf6:
+    enabled: false   # added 2026-05-13 — URI is a GUESS, verify with cfclient!
+    uri: radio://1/5/2M/E7E7E7E706
+    initial_position: [-1.0, 0.0, 0.0]
     type: cf21
   cf7:
     enabled: false   # alive (last scan 2026-05-01)
-    uri: radio://0/5/2M/E7E7E7E707
+    uri: radio://2/5/2M/E7E7E7E707
     initial_position: [-1.0, 1.0, 0.0]
     type: cf21
   cf9:
-    enabled: false   # off / dead battery
-    uri: radio://0/6/2M/E7E7E7E709
+    enabled: false   # alive (re-enabled 2026-05-13)
+    uri: radio://2/6/2M/E7E7E7E709
     initial_position: [0.0, -1.0, 0.0]
     type: cf21
 
@@ -66,9 +74,9 @@ robot_types:
       # When switching back to 4 markers, set:
       #   tracking: "vendor"  (or "librigidbodytracker")
       #   marker:   "default"
-      tracking: "librigidbodytracker"
-      marker: "default_single_marker"
-      dynamics: "default"
+      tracking: librigidbodytracker
+      marker: default_single_marker
+      dynamics: default
     big_quad: false
     battery:
       voltage_warning: 3.8

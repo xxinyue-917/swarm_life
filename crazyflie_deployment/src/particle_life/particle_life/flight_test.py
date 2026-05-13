@@ -18,15 +18,17 @@ HOVER_HEIGHT = 0.5       # meters (low for first flight)
 TAKEOFF_DURATION = 3.0
 WAYPOINT_DURATION = 3.0  # per leg
 LAND_DURATION = 3.0
-ESTIMATOR_WARMUP = 3.0   # seconds; let Kalman converge on Vicon extpose
+ESTIMATOR_WARMUP = 8.0   # seconds; let Kalman converge on Vicon extpose
                          # before the firmware tries to control attitude
 
-# Small box around origin, all at HOVER_HEIGHT. Adjust for your Vicon volume.
-BOX = [
-    (0.3,  0.0, HOVER_HEIGHT),
-    (0.3,  0.3, HOVER_HEIGHT),
-    (0.0,  0.3, HOVER_HEIGHT),
-    (0.0,  0.0, HOVER_HEIGHT),
+# 0.3 m box RELATIVE to the *current* position at each step. With z=0 the
+# drone stays at takeoff height (HOVER_HEIGHT) throughout. Each waypoint is
+# an offset from where the drone is now, not from the takeoff origin.
+BOX_REL = [
+    ( 0.3,  0.0, 0.0),
+    ( 0.0,  0.3, 0.0),
+    (-0.3,  0.0, 0.0),
+    ( 0.0, -0.3, 0.0),
 ]
 
 
@@ -47,10 +49,10 @@ def main():
     timeHelper.sleep(TAKEOFF_DURATION + 0.5)
 
     try:
-        for i, wp in enumerate(BOX):
-            print(f"[flight_test] waypoint {i + 1}/{len(BOX)} -> {wp}")
+        for i, wp in enumerate(BOX_REL):
+            print(f"[flight_test] waypoint {i + 1}/{len(BOX_REL)} (relative) -> {wp}")
             for cf in cfs:
-                cf.goTo(wp, yaw=0.0, duration=WAYPOINT_DURATION)
+                cf.goTo(wp, yaw=0.0, duration=WAYPOINT_DURATION, relative=True)
             timeHelper.sleep(WAYPOINT_DURATION + 0.3)
     except KeyboardInterrupt:
         print("[flight_test] interrupted")
