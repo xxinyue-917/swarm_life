@@ -5,9 +5,26 @@
 # Each entry maps a drone name (matching crazyflies.yaml + Vicon rigid body)
 # to a species index. Switch presets by changing the active block.
 
-active: two_species_5_5    # which preset below to use
+active: nine_species    # which preset below to use
+
+# Path (relative to config/) to a JSON file with k_pos / k_rot matrices.
+# The matrix must be n_species × n_species (max species index + 1).
+matrix_preset: presets/nine_species_cyclic.json
 
 presets:
+  nine_species:
+    description: "Each of 9 drones is its own species (cf1..cf9 → 0..8). Default for M3."
+    assignments:
+      cf1: 0
+      cf2: 1
+      cf3: 2
+      cf4: 3
+      cf5: 4
+      cf6: 5
+      cf7: 6
+      cf8: 7
+      cf9: 8
+
   two_species_5_5:
     description: "5 + 5 split for chase, encapsulate, move_together"
     assignments:

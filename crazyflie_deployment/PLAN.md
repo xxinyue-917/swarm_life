@@ -51,6 +51,8 @@ Track your progress here. Check each box as you complete it and note any issues.
 - [ ] Battery voltage logged during flight (~3.0V/cell = low)
 
 ### Phase 4 — M2: Two-Drone K_pos Chase
+- [x] Sim backend: force-control loop implemented in `particle_life_node.py` (`--mode force`, default); reads poses via `cf.position()`, computes velocities with `force_controller.compute_velocities`, streams targets via SetpointAdapter (2026-05-13)
+- [x] Sim backend: 9-species default preset (`config/presets/nine_species_cyclic.json`); drone count auto-derived from enabled robots in `crazyflies.yaml`
 - [ ] 2 drones hover simultaneously (one per radio is fine)
 - [ ] `particle_life_node` scaffold running: subscribes to poses, drives drones via SetpointAdapter (cmdPosition on hardware, cmdFullState on sim)
 - [ ] Species assigned (drone 1 = species 0, drone 2 = species 1)
