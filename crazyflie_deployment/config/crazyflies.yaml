@@ -1,65 +1,70 @@
 # Crazyswarm2-format drone config
 # Used by ros2 launch crazyflie launch.py via crazyflies_yaml_file argument
 #
-# Fleet inherited from previous Crazyswarm1 deployment:
-#   cf1-cf4 on channel 1, cf5+cf7 on channel 5, cf9 on channel 6
-#   No cf6, cf8, cf10 (gap in original numbering)
+# Fleet (as of 2026-05-14):
+#   cf1, cf2, cf3, cf4, cf5, cf6, cf7, cf8, cf9 — all 9 drones flight-worthy
+#   cf3, cf8, cf9 are NEW drones (2026-05-14) replacing the old cf3/cf8/cf9 slots:
+#     - old cf3: was off / dead battery
+#     - cf8: no entry existed before (gap in original numbering)
+#     - old cf9: could not balance after 2026-05-14 prop reinstall, retired
+#   Old cf1/cf2/cf4/cf5/cf6/cf7 still in use — all per-drone hover-tested 2026-05-14.
 #
-# All drones start enabled = false. Enable each drone only after:
-#   (1) battery charged and drone responds to radio scan
-#   (2) Vicon rigid body matching the name exists and is tracked
+# Dongle assignment (cflib URIs are 0-indexed): cf1-3 → dongle 0, cf4-6 → dongle 1,
+# cf7-9 → dongle 2. Plug the 3 Crazyradios in the order you want them numbered —
+# USB enumeration sets the index.
 
 fileversion: 3
 
 robots:
-  # New Crazyflie (added 2026-05-12), kept under a separate name to avoid
-  # confusion with the older cf1-cf9 fleet. Factory-default address until
-  # reconfigured — verify with `cfclient` Scan and update if it differs.
-  # Dongle assignment (cflib URIs are 0-indexed): cf1-3 → dongle 0, cf4-6 → dongle 1,
-  # cf7-9 → dongle 2. cfx kept on dongle 0 (factory ch80, used standalone). Plug the
-  # 3 Crazyradios in the order you want them numbered — USB enumeration sets the index.
+  # Standalone mocap-volume probe (added 2026-05-12). Disabled when the real
+  # fleet is flying to avoid factory-channel interference with fleet radios.
   cfx:
-    enabled: true
+    enabled: false
     uri: radio://0/80/2M/E7E7E7E7E7
-    initial_position: [-1.0, 1.0, 0.0]   # cf7's slot — mocap-volume probe
+    initial_position: [-1.0, 1.0, 0.0]
     type: cf21
   cf1:
-    enabled: false   # alive (last scan 2026-05-01); flips on takeoff (2026-05-04)
+    enabled: true
     uri: radio://0/1/2M/E7E7E7E701
     initial_position: [1.0, 1.0, 0.0]
     type: cf21
   cf2:
-    enabled: false   # active (cf1/cf2/cf4 3-drone test 2026-05-13)
+    enabled: true
     uri: radio://0/1/2M/E7E7E7E702
     initial_position: [1.0, 0.0, 0.0]
     type: cf21
   cf3:
-    enabled: false   # off / dead battery
+    enabled: false   # NEW drone (2026-05-14), flashed to E7E7E7E703/ch1; off for first 6-drone test
     uri: radio://0/1/2M/E7E7E7E703
     initial_position: [1.0, -1.0, 0.0]
     type: cf21
   cf4:
-    enabled: false   # active (cf1/cf2/cf4 3-drone test 2026-05-13)
+    enabled: true
     uri: radio://1/1/2M/E7E7E7E704
     initial_position: [0.0, 1.0, 0.0]
     type: cf21
   cf5:
-    enabled: false   # alive (last scan 2026-05-01)
+    enabled: true
     uri: radio://1/5/2M/E7E7E7E705
     initial_position: [0.0, 0.0, 0.0]
     type: cf21
   cf6:
-    enabled: false   # added 2026-05-13 — URI is a GUESS, verify with cfclient!
+    enabled: true
     uri: radio://1/5/2M/E7E7E7E706
     initial_position: [-1.0, 0.0, 0.0]
     type: cf21
   cf7:
-    enabled: false   # alive (last scan 2026-05-01)
+    enabled: true
     uri: radio://2/5/2M/E7E7E7E707
     initial_position: [-1.0, 1.0, 0.0]
     type: cf21
+  cf8:
+    enabled: false   # NEW drone (2026-05-14), not yet flashed — off until cfclient burn
+    uri: radio://2/5/2M/E7E7E7E708
+    initial_position: [-1.0, -1.0, 0.0]
+    type: cf21
   cf9:
-    enabled: false   # alive (re-enabled 2026-05-13)
+    enabled: false   # NEW drone (2026-05-14), not yet flashed — off until cfclient burn
     uri: radio://2/6/2M/E7E7E7E709
     initial_position: [0.0, -1.0, 0.0]
     type: cf21

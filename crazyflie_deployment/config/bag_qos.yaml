@@ -42,6 +42,10 @@
   reliability: best_effort
   history: keep_last
   depth: 100
+/cf8/pose:
+  reliability: best_effort
+  history: keep_last
+  depth: 100
 /cf9/pose:
   reliability: best_effort
   history: keep_last

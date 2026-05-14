@@ -22,7 +22,7 @@ BAG_TOPICS = [
     '/poses', '/tf', '/tf_static', '/rosout',
     '/cfx/pose',
     '/cf1/pose', '/cf2/pose', '/cf3/pose', '/cf4/pose',
-    '/cf5/pose', '/cf6/pose', '/cf7/pose', '/cf9/pose',
+    '/cf5/pose', '/cf6/pose', '/cf7/pose', '/cf8/pose', '/cf9/pose',
 ]
 
 
