@@ -1,72 +1,81 @@
 # Crazyswarm2-format drone config
 # Used by ros2 launch crazyflie launch.py via crazyflies_yaml_file argument
 #
-# Fleet (as of 2026-05-14):
-#   cf1, cf2, cf3, cf4, cf5, cf6, cf7, cf8, cf9 — all 9 drones flight-worthy
-#   cf3, cf8, cf9 are NEW drones (2026-05-14) replacing the old cf3/cf8/cf9 slots:
-#     - old cf3: was off / dead battery
-#     - cf8: no entry existed before (gap in original numbering)
-#     - old cf9: could not balance after 2026-05-14 prop reinstall, retired
-#   Old cf1/cf2/cf4/cf5/cf6/cf7 still in use — all per-drone hover-tested 2026-05-14.
+# Channel reassignment 2026-05-18: every drone gets a unique channel in
+# the 81-89 range (CF ch80+ = 2480+ MHz, above all 2.4 GHz WiFi). Naming
+# convention: cfN → channel 80+N. Address still E7E7E7E70N. This kills the
+# inherited cross-dongle channel collisions (cf4/cf1-3 on ch1, cf7/cf5-6 on ch5)
+# AND moves the whole fleet out of WiFi territory. Was: ch1/ch5/ch6, which sit
+# inside WiFi ch1 (2401-2423 MHz) — works but vulnerable to anyone's router.
 #
 # Dongle assignment (cflib URIs are 0-indexed): cf1-3 → dongle 0, cf4-6 → dongle 1,
 # cf7-9 → dongle 2. Plug the 3 Crazyradios in the order you want them numbered —
 # USB enumeration sets the index.
+#
+# Each drone must be reflashed via cfclient before it will respond at the new URI.
+# Per drone: Connect at current URI → Configure 2.x → set Radio channel to the
+# value in the table → Write → drone reboots on new channel. enabled stays false
+# until the reflash is verified.
 
 fileversion: 3
 
 robots:
-  # Standalone mocap-volume probe (added 2026-05-12). Disabled when the real
-  # fleet is flying to avoid factory-channel interference with fleet radios.
+  # Standalone mocap-volume probe. Kept on factory ch80 (cfx is below the fleet's
+  # 81-89 range so it never collides). Disabled when the real fleet is flying.
   cfx:
     enabled: false
     uri: radio://0/80/2M/E7E7E7E7E7
     initial_position: [-1.0, 1.0, 0.0]
     type: cf21
+  # initial_position MUST match the physical drone-to-URI placement, otherwise
+  # librigidbodytracker assigns each Vicon rigid body to the marker of a
+  # DIFFERENT physical drone — extPos then goes to the wrong firmware and the
+  # fleet flies into walls on takeoff. This caused the 2026-05-18 cf6/cf8/cf9
+  # crashes: cf6/cf8/cf9 were cyclically swapped vs the YAML below.
   cf1:
-    enabled: true
-    uri: radio://0/1/2M/E7E7E7E701
+    enabled: true    # reflashed to ch81 (2026-05-18)
+    uri: radio://0/81/2M/E7E7E7E701
     initial_position: [1.0, 1.0, 0.0]
     type: cf21
   cf2:
-    enabled: true
-    uri: radio://0/1/2M/E7E7E7E702
+    enabled: true    # reflashed to ch82 (2026-05-18)
+    uri: radio://0/82/2M/E7E7E7E702
     initial_position: [1.0, 0.0, 0.0]
     type: cf21
   cf3:
-    enabled: false   # NEW drone (2026-05-14), flashed to E7E7E7E703/ch1; off for first 6-drone test
-    uri: radio://0/1/2M/E7E7E7E703
+    enabled: true    # NEW drone (2026-05-14), reflashed to ch83 (2026-05-18)
+    uri: radio://0/83/2M/E7E7E7E703
     initial_position: [1.0, -1.0, 0.0]
     type: cf21
   cf4:
-    enabled: true
-    uri: radio://1/1/2M/E7E7E7E704
+    enabled: true    # reflashed to ch84 (2026-05-18)
+    uri: radio://1/84/2M/E7E7E7E704
     initial_position: [0.0, 1.0, 0.0]
     type: cf21
   cf5:
-    enabled: true
-    uri: radio://1/5/2M/E7E7E7E705
+    enabled: true    # reflashed to ch85 (2026-05-18)
+    uri: radio://1/85/2M/E7E7E7E705
     initial_position: [0.0, 0.0, 0.0]
     type: cf21
   cf6:
-    enabled: true
-    uri: radio://1/5/2M/E7E7E7E706
-    initial_position: [-1.0, 0.0, 0.0]
+    enabled: true    # 2026-05-18: physical position corrected from (-1,0) to (0,-1) to match actual drone placement
+    uri: radio://1/86/2M/E7E7E7E706
+    initial_position: [0.0, -1.0, 0.0]
     type: cf21
   cf7:
-    enabled: true
-    uri: radio://2/5/2M/E7E7E7E707
+    enabled: true    # reflashed to ch87 (2026-05-18)
+    uri: radio://2/87/2M/E7E7E7E707
     initial_position: [-1.0, 1.0, 0.0]
     type: cf21
   cf8:
-    enabled: false   # NEW drone (2026-05-14), not yet flashed — off until cfclient burn
-    uri: radio://2/5/2M/E7E7E7E708
-    initial_position: [-1.0, -1.0, 0.0]
+    enabled: true    # 2026-05-18: physical position corrected from (-1,-1) to (-1,0) to match actual drone placement
+    uri: radio://2/88/2M/E7E7E7E708
+    initial_position: [-1.0, 0.0, 0.0]
     type: cf21
   cf9:
-    enabled: false   # NEW drone (2026-05-14), not yet flashed — off until cfclient burn
-    uri: radio://2/6/2M/E7E7E7E709
-    initial_position: [0.0, -1.0, 0.0]
+    enabled: true    # 2026-05-18: physical position corrected from (0,-1) to (-1,-1) to match actual drone placement
+    uri: radio://2/89/2M/E7E7E7E709
+    initial_position: [-1.0, -1.0, 0.0]
     type: cf21
 
 robot_types:

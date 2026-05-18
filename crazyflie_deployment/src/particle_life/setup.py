@@ -33,6 +33,7 @@ setup(
             'hover_test = particle_life.hover_test:main',
             'hover_all = particle_life.hover_all:main',
             'hover_one = particle_life.hover_one:main',
+            'circle_all = particle_life.circle_all:main',
         ],
     },
 )
