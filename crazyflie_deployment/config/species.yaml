@@ -5,13 +5,26 @@
 # Each entry maps a drone name (matching crazyflies.yaml + Vicon rigid body)
 # to a species index. Switch presets by changing the active block.
 
-active: nine_species    # which preset below to use
+active: three_groups_9drone    # which preset below to use
 
 # Path (relative to config/) to a JSON file with k_pos / k_rot matrices.
 # The matrix must be n_species × n_species (max species index + 1).
-matrix_preset: presets/nine_species_cyclic.json
+matrix_preset: presets/three_groups_encapsulate_rotate.json
 
 presets:
+  three_groups_9drone:
+    description: "9 drones in 3 groups. species 0 = top-right L (cf1,cf2,cf4 → centroid +0.67,+0.67); species 1 = bottom-right L + center (cf3,cf5,cf6 → centroid +0.33,-0.67); species 2 = left column (cf7,cf8,cf9 → centroid -1,0)."
+    assignments:
+      cf1: 0    # (+1, +1)  TR-L
+      cf2: 0    # (+1,  0)
+      cf4: 0    # ( 0, +1)
+      cf3: 1    # (+1, -1)  BR-L + center
+      cf5: 1    # ( 0,  0)
+      cf6: 1    # ( 0, -1)
+      cf7: 2    # (-1, +1)  left column
+      cf8: 2    # (-1,  0)
+      cf9: 2    # (-1, -1)
+
   nine_species:
     description: "Each of 9 drones is its own species (cf1..cf9 → 0..8). Default for M3."
     assignments:

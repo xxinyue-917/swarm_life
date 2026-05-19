@@ -26,7 +26,7 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'particle_life_node = particle_life.particle_life_node:main',
+            'particle_life = particle_life.particle_life:main',
             'viewer = particle_life.viewer:main',
             'flight_test = particle_life.flight_test:main',
             'flight_test_all = particle_life.flight_test_all:main',

@@ -1,0 +1,14 @@
+{
+  "description": "Three independent clusters that each rotate within themselves. Diagonal-only K_pos (strong self-cohesion 0.8, zero cross-species → no encapsulation) keeps the 3 groups spatially separated. Diagonal K_rot=1.0 → each cluster spins as a triangle. Use --aggregate-duration N to delay rotation until clusters have formed.",
+  "n_species": 3,
+  "k_pos": [
+    [0.8, 0.0, 0.0],
+    [0.0, 0.8, 0.0],
+    [0.0, 0.0, 0.8]
+  ],
+  "k_rot": [
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0]
+  ]
+}

@@ -51,10 +51,11 @@ Track your progress here. Check each box as you complete it and note any issues.
 - [ ] Battery voltage logged during flight (~3.0V/cell = low)
 
 ### Phase 4 — M2: Two-Drone K_pos Chase
-- [x] Sim backend: force-control loop implemented in `particle_life_node.py` (`--mode force`, default); reads poses via `cf.position()`, computes velocities with `force_controller.compute_velocities`, streams targets via SetpointAdapter (2026-05-13)
-- [x] Sim backend: 9-species default preset (`config/presets/nine_species_cyclic.json`); drone count auto-derived from enabled robots in `crazyflies.yaml`
+- [x] Force-control loop implemented in `particle_life.py` (`--mode force`, default); reads poses via dedicated `/cfN/pose` subscribers with stale-watchdog, computes velocities with `force_controller.compute_velocities`, streams targets via `cmdFullState` (sim/fake_server/hardware all share one codepath) (2026-05-13, rewritten 2026-05-19)
+- [x] 9-species default preset shipped; drone count auto-derived from enabled robots in `crazyflies.yaml`. Active preset switched to `three_groups_encapsulate_rotate.json` (3 groups of 3, encapsulation + swirl) on 2026-05-19
+- [x] `fake_server` (perfect-tracking ROS stub) for viewer-only iteration without crazyflie_sim's per-tick PID + physics overhead (2026-05-19)
 - [ ] 2 drones hover simultaneously (one per radio is fine)
-- [ ] `particle_life_node` scaffold running: subscribes to poses, drives drones via SetpointAdapter (cmdPosition on hardware, cmdFullState on sim)
+- [ ] `particle_life` scaffold running: subscribes to poses, drives drones via `cmdFullState`
 - [ ] Species assigned (drone 1 = species 0, drone 2 = species 1)
 - [ ] K_pos-only force computation running at 30 Hz (K_rot = 0)
 - [ ] `force_output_scale` tuned (start 0.1, increase until motion visible)
@@ -88,7 +89,7 @@ Track your progress here. Check each box as you complete it and note any issues.
 
 ### Open TODOs
 
-- [ ] **Custom simulation frontend** — Crazyswarm2's built-in sim GUI is hard to use. Build a lightweight custom visualization that subscribes to drone poses from ROS and renders them (3D scatter, optionally reusing the swarm_life pygame aesthetic). Design doc at `SIM_DESIGN.md`.
+- [x] **Custom simulation frontend** — implemented as `viewer.py` (pygame, self-contained: grid + trails + z bar + stale watchdog + keyboard toggles). Paired with `fake_server.py` (perfect-tracking ROS stub) so the visualization works at real-time speed without crazyflie_sim's PID + 6-DOF integration overhead (2026-05-19).
 
 ### Issues Log
 
@@ -133,7 +134,7 @@ Ubuntu 24.04 LTS
 │   ├── crazyflie_server (radio communication)
 │   ├── motion_capture_tracking (Vicon → ROS2 poses)
 │   └── crazyflie_interfaces (msg/srv definitions)
-├── particle_life_node (custom, this project)
+├── particle_life (custom, this project)
 │   ├── Force computation (K_pos + optional K_rot)
 │   ├── Safety layer (geofence, separation, watchdogs)
 │   └── Coordinate transform (Vicon → sim → velocity)
@@ -180,7 +181,7 @@ source install/setup.bash
 │                    10× /cfN/pose topics               │
 │                              ▼                        │
 │  ┌────────────────────────────────────────────────┐  │
-│  │  particle_life_node (single node, 30Hz timer)  │  │
+│  │  particle_life (single node, 30Hz timer)       │  │
 │  │                                                │  │
 │  │  ┌─────────────┐   ┌────────────────────┐      │  │
 │  │  │  Pose Store │   │  Safety Layer      │      │  │
@@ -238,7 +239,7 @@ source install/setup.bash
 We compute desired velocity from particle life forces, **integrate to a position target**, and stream that target via `cmdPosition(pos, yaw)`. The Crazyflie's onboard PID (running at 100+ Hz) closes the loop on position — far tighter than any feedforward we could compute from 30 Hz Vicon-derived velocities.
 
 ```
-particle_life_node (30 Hz):
+particle_life (30 Hz):
     F = K_pos · radial + K_rot · tangential        # same NumPy as simulation
     v = F · force_output_scale                      # sim → m/s
     target_pos = current_pos + v · dt               # integrate
@@ -353,7 +354,7 @@ This preserves the physical intent: "a fast-moving neighbor deflects you tangent
 |-----|------|-------------------|
 | 1 | Install ROS2 Jazzy + Crazyswarm2. Flash Crazyflie firmware. Set up udev rules for Crazyradio PA. | `cfclient` GUI connects to drone |
 | 2 | Configure Vicon rigid body (4 asymmetric markers). Test `motion_capture_tracking` node. | `ros2 topic echo /cf1/pose` shows live position |
-| 3 | Write `particle_life_node` scaffold: pose subscription, 30Hz timer, safety layer, SetpointAdapter (cmdPosition on hardware, cmdFullState on sim). Hover = static target at (x₀, y₀, 1.0m). | Drone hovers at z=1.0m for 60s |
+| 3 | Write `particle_life` scaffold: pose subscription, 30Hz timer, safety layer, `cmdFullState` stream. Hover = static target at (x₀, y₀, 1.0m). | Drone hovers at z=1.0m for 60s |
 | 4 | Test all safety triggers: move drone to geofence boundary (lands?), cover Vicon markers (watchdog triggers?), press ESC (emergency stop?). | All 6 safety checks verified |
 
 **Common blockers**: Crazyradio udev rules not set (`sudo cp 99-crazyflie.rules /etc/udev/rules.d/`), Vicon coordinate frame flipped, onboard EKF not receiving external position (enable `motion` deck parameter).
@@ -424,7 +425,7 @@ crazyflie_deployment/
 │   ├── arena.yaml              # Geofence bounds, origin, scale factor
 │   └── presets/                # K_pos/K_rot matrices for physical deployment
 ├── src/
-│   ├── particle_life_node.py   # Main ROS2 node (force computation + safety)
+│   ├── particle_life.py        # Main ROS2 node (force computation + safety)
 │   ├── safety.py               # Safety layer (geofence, watchdog, separation)
 │   ├── force_computation.py    # Ported from src/particle_life.py
 │   ├── coordinate_transform.py # Vicon ↔ sim ↔ world transforms

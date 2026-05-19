@@ -1,0 +1,14 @@
+{
+  "description": "Three groups of 3 drones, all mutually attracting + rotating together. Ported from research preset 3_encapsulate_rotate.json (k_pos = position_matrix, k_rot = orientation_matrix). Nested-shell encapsulation: species 0 cores, species 1 forms first ring, species 2 outermost. Symmetric K_rot=1.0 → coherent global swirl.",
+  "n_species": 3,
+  "k_pos": [
+    [0.6, 0.2, 0.2],
+    [0.2, 0.6, 0.2],
+    [0.2, 0.2, 0.6]
+  ],
+  "k_rot": [
+    [0.0, 1.0, 1.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 1.0, 0.0]
+  ]
+}
