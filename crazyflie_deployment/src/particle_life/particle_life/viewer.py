@@ -1,183 +1,409 @@
 #!/usr/bin/env python3
 """
-Pygame-based custom viewer for the Crazyflie swarm.
+Top-down pygame viewer for the Crazyflie swarm.
 
-Reuses the existing ParticleLife rendering (anti-aliased circles, species
-colors, centroid markers) by replacing its physics step with live Vicon poses
-streamed from /cfN/pose topics.
+Subscribes to `/cfN/pose` (PoseStamped) for every enabled drone in
+`crazyflies.yaml` and renders their live XY positions on a 2D arena.
+Works with any pose source — Crazyswarm2 hardware backend, sim backend,
+or `fake_server` (perfect-tracking stub).
 
-Designed per crazyflie_deployment/SIM_DESIGN.md (Option A — pygame reuse).
+Render
+------
+* Arena box matching `arena.yaml` (width × height, centered at origin_x/y).
+* 0.5 m grid for spatial reference.
+* Each drone:
+    - circle colored by species (from `species.yaml`)
+    - drone name label
+    - altitude bar to the right (0 → 1.5 m)
+    - fading trail of recent positions
+* Status bar: FPS, "N / M receiving", per-drone stale flag (>1 s since last
+  pose).
 
-Usage:
-    ros2 run particle_life viewer
-    # In a separate terminal, run Crazyswarm2 (sim or hardware)
+Keyboard
+--------
+    T   toggle trails
+    L   toggle drone labels
+    G   toggle grid
+    C   clear trails
+    ESC / Q   quit
 """
+from __future__ import annotations
 
 import os
-import importlib.util
 import threading
-import yaml
+import time
+from collections import deque
+from typing import Optional
+
 import numpy as np
 import pygame
+import yaml
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 
-# Load the swarm_life ParticleLife module directly from its file
-# (cannot use plain `import particle_life` — collides with this ROS package's name)
-_SWARM_LIFE_FILE = os.path.expanduser('~/swarm_life/src/particle_life.py')
-_spec = importlib.util.spec_from_file_location('swarm_life_pl', _SWARM_LIFE_FILE)
-_pl_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_pl_mod)
-ParticleLife = _pl_mod.ParticleLife
-Config = _pl_mod.Config
+
+# ---------------------------------------------------------------- paths
+
+_REPO_CONFIG = os.path.expanduser(
+    '~/swarm_life/crazyflie_deployment/config')
 
 
-# Arena geometry — must match crazyflie_deployment/config/arena.yaml
-ARENA_SIZE = 3.0  # meters; arena is centered at (0,0) in Vicon frame
+def _find(*candidates):
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
 
 
-def load_species_config(path=None):
-    """Read drone → species mapping from config/species.yaml."""
-    if path is None:
-        # Default: alongside the package config dir
-        candidates = [
-            os.path.expanduser('~/swarm_life/crazyflie_deployment/config/species.yaml'),
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                path = c
-                break
-    if path is None or not os.path.exists(path):
-        # Fallback: empty mapping; viewer will assign all drones to species 0
-        return {}, 1
+def _config_path(name):
+    """Resolve a config file from package share (preferred) or repo source."""
+    # When run from install/ via ros2 run, the configs ship in pkg share.
+    share = None
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        share = os.path.join(
+            get_package_share_directory('particle_life'), 'config', name)
+    except Exception:
+        pass
+    return _find(share, os.path.join(_REPO_CONFIG, name))
+
+
+# ---------------------------------------------------------------- config
+
+def load_drone_roster():
+    """Return (names, init_positions) for every enabled drone in crazyflies.yaml."""
+    path = _config_path('crazyflies.yaml')
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    active = cfg.get('active', list(cfg.get('presets', {}).keys())[0])
-    preset = cfg['presets'][active]
-    assignments = preset['assignments']
-    n_species = max(assignments.values()) + 1
-    return assignments, n_species
+    names, init = [], {}
+    for name, info in (cfg.get('robots') or {}).items():
+        if info.get('enabled', False):
+            names.append(name)
+            init[name] = info.get('initial_position', [0.0, 0.0, 0.0])
+    return names, init
 
 
-class CFViewer(Node):
-    """ROS2 node that streams live drone poses into a pygame window."""
+def load_species(names):
+    """Return (species_per_drone, n_species)."""
+    path = _config_path('species.yaml')
+    if path is None:
+        return [0] * len(names), 1
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    active = cfg.get('active')
+    preset = cfg.get('presets', {}).get(active, {})
+    assignments = preset.get('assignments', {})
+    n_species = (max(assignments.values()) + 1) if assignments else 1
+    return [assignments.get(n, 0) for n in names], n_species
 
-    def __init__(self, drone_names, species_assignments, n_species):
+
+def load_arena():
+    """Return dict with width, height, origin_x, origin_y. Defaults if missing."""
+    path = _config_path('arena.yaml')
+    if path is None:
+        return {'width': 3.0, 'height': 3.0, 'origin_x': 0.0, 'origin_y': 0.0}
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    a = cfg.get('arena', {})
+    return {
+        'width': float(a.get('width', 3.0)),
+        'height': float(a.get('height', 3.0)),
+        'origin_x': float(a.get('origin_x', 0.0)),
+        'origin_y': float(a.get('origin_y', 0.0)),
+    }
+
+
+# ---------------------------------------------------------------- colors
+
+# tab10-ish palette (RGB 0-255), drone-species mapping.
+SPECIES_COLORS = [
+    (31, 119, 180),    # blue
+    (255, 127, 14),    # orange
+    (44, 160, 44),     # green
+    (214, 39, 40),     # red
+    (148, 103, 189),   # purple
+    (140, 86, 75),     # brown
+    (227, 119, 194),   # pink
+    (127, 127, 127),   # gray
+    (188, 189, 34),    # yellow-green
+    (23, 190, 207),    # cyan
+]
+
+BG = (245, 245, 248)
+ARENA_LINE = (60, 60, 60)
+GRID_LINE = (220, 220, 225)
+TEXT_DARK = (40, 40, 50)
+TEXT_DIM = (150, 150, 160)
+STALE = (190, 190, 190)
+STATUS_BG = (28, 30, 36)
+STATUS_TEXT = (235, 235, 240)
+Z_BAR_BG = (210, 210, 215)
+
+
+# ---------------------------------------------------------------- node
+
+class ViewerNode(Node):
+    """ROS subscriber side: collects poses into a thread-safe state dict."""
+
+    def __init__(self, names):
         super().__init__('cf_viewer')
-
-        self.drone_names = drone_names  # ordered list, e.g. ['cf1', 'cf5', 'cf7']
-        self.n_drones = len(drone_names)
-        self.species_assignments = species_assignments
+        self.names = names
         self.lock = threading.Lock()
+        # x, y, z, last_update_wall_t per drone
+        self.state = {n: (0.0, 0.0, 0.0, 0.0) for n in names}
 
-        # Build a ParticleLife instance with N=n_drones, initialized headless
-        cfg = Config(
-            n_species=n_species,
-            n_particles=self.n_drones // n_species + 1,
-            sim_width=ARENA_SIZE,
-            sim_height=ARENA_SIZE,
-            width=900,
-            height=900,
-        )
-        self.sim = ParticleLife(cfg, headless=False)
-        # Override n and species to exactly match our drone roster
-        self.sim.n = self.n_drones
-        self.sim.positions = np.full((self.n_drones, 2), ARENA_SIZE / 2)  # center
-        self.sim.velocities = np.zeros((self.n_drones, 2))
-        self.sim.orientations = np.zeros(self.n_drones)
-        self.sim.species = np.array(
-            [species_assignments.get(name, 0) for name in drone_names], dtype=int
-        )
-
-        # Per-drone pose subscribers
-        self._poses_received = {name: False for name in drone_names}
-        for idx, name in enumerate(drone_names):
+        for name in names:
             self.create_subscription(
-                PoseStamped,
-                f'/{name}/pose',
-                lambda msg, i=idx, n=name: self._update_pose(i, n, msg),
-                10,
+                PoseStamped, f'/{name}/pose',
+                lambda msg, n=name: self._update(n, msg), 10)
+        self.get_logger().info(f"viewer subscribing to {len(names)} drones: {names}")
+
+    def _update(self, name, msg):
+        with self.lock:
+            self.state[name] = (
+                msg.pose.position.x,
+                msg.pose.position.y,
+                msg.pose.position.z,
+                time.monotonic(),
             )
 
-        self.get_logger().info(
-            f"viewer started — tracking {self.n_drones} drones: {drone_names}"
+    def snapshot(self):
+        with self.lock:
+            return dict(self.state)
+
+
+# ---------------------------------------------------------------- render
+
+class Renderer:
+
+    Z_MAX = 1.5            # m, top of altitude bar
+    TRAIL_LEN = 60         # samples kept per drone
+    STALE_AFTER = 1.0      # s; older poses → dim
+
+    def __init__(self, names, species, n_species, arena, window=(960, 980)):
+        self.names = names
+        self.species = species
+        self.n_species = n_species
+        self.arena = arena
+        self.show_trails = True
+        self.show_labels = True
+        self.show_grid = True
+
+        self.window_w, self.window_h = window
+        self.status_h = 36
+        self.plot_h = self.window_h - self.status_h
+        # Square plot area centered horizontally.
+        self.plot_size = min(self.window_w - 40, self.plot_h - 40)
+        self.plot_x0 = (self.window_w - self.plot_size) // 2
+        self.plot_y0 = self.status_h + (self.plot_h - self.plot_size) // 2
+
+        pygame.init()
+        pygame.font.init()
+        self.screen = pygame.display.set_mode((self.window_w, self.window_h))
+        pygame.display.set_caption("Crazyflie Particle Life Viewer")
+        self.font = pygame.font.SysFont('DejaVu Sans', 14)
+        self.font_small = pygame.font.SysFont('DejaVu Sans', 11)
+        self.font_status = pygame.font.SysFont('DejaVu Sans', 13, bold=True)
+
+        self.trails = {n: deque(maxlen=self.TRAIL_LEN) for n in names}
+
+    # ---------------- coordinate transform ----------------
+
+    def to_screen(self, x, y):
+        """World (m) → screen pixel. Arena centered at origin_x/y."""
+        nx = (x - self.arena['origin_x']) / self.arena['width'] + 0.5
+        ny = (y - self.arena['origin_y']) / self.arena['height'] + 0.5
+        # Pygame y axis is flipped relative to math y axis.
+        return (
+            int(self.plot_x0 + nx * self.plot_size),
+            int(self.plot_y0 + (1 - ny) * self.plot_size),
         )
 
-    def _update_pose(self, idx, name, msg):
-        with self.lock:
-            # Vicon arena is centered at (0,0); sim arena is (0..ARENA_SIZE)
-            self.sim.positions[idx, 0] = msg.pose.position.x + ARENA_SIZE / 2
-            self.sim.positions[idx, 1] = msg.pose.position.y + ARENA_SIZE / 2
-            self._poses_received[name] = True
+    # ---------------- drawing primitives ----------------
 
-    def snapshot(self):
-        """Thread-safe copy of state for the render thread."""
-        with self.lock:
-            return self.sim.positions.copy(), self.sim.species.copy()
+    def _draw_grid(self):
+        # 0.5 m grid lines.
+        step = 0.5
+        ox, oy = self.arena['origin_x'], self.arena['origin_y']
+        w, h = self.arena['width'], self.arena['height']
+        x_lines = np.arange(np.ceil((ox - w / 2) / step) * step,
+                            ox + w / 2 + 1e-9, step)
+        y_lines = np.arange(np.ceil((oy - h / 2) / step) * step,
+                            oy + h / 2 + 1e-9, step)
+        for x in x_lines:
+            p0 = self.to_screen(x, oy - h / 2)
+            p1 = self.to_screen(x, oy + h / 2)
+            color = ARENA_LINE if abs(x) < 1e-6 else GRID_LINE
+            pygame.draw.line(self.screen, color, p0, p1, 1)
+        for y in y_lines:
+            p0 = self.to_screen(ox - w / 2, y)
+            p1 = self.to_screen(ox + w / 2, y)
+            color = ARENA_LINE if abs(y) < 1e-6 else GRID_LINE
+            pygame.draw.line(self.screen, color, p0, p1, 1)
+
+    def _draw_arena_box(self):
+        p0 = self.to_screen(self.arena['origin_x'] - self.arena['width'] / 2,
+                            self.arena['origin_y'] - self.arena['height'] / 2)
+        p1 = self.to_screen(self.arena['origin_x'] + self.arena['width'] / 2,
+                            self.arena['origin_y'] + self.arena['height'] / 2)
+        rect = pygame.Rect(p0[0], p1[1], p1[0] - p0[0], p0[1] - p1[1])
+        pygame.draw.rect(self.screen, ARENA_LINE, rect, 2)
+
+    def _draw_axis_ticks(self):
+        # Axis labels at corners.
+        w, h = self.arena['width'], self.arena['height']
+        ox, oy = self.arena['origin_x'], self.arena['origin_y']
+        for (x, y, anchor) in [
+            (ox - w / 2, oy - h / 2, ('left', 'top')),
+            (ox + w / 2, oy - h / 2, ('right', 'top')),
+            (ox - w / 2, oy + h / 2, ('left', 'bottom')),
+            (ox + w / 2, oy + h / 2, ('right', 'bottom')),
+        ]:
+            sx, sy = self.to_screen(x, y)
+            label = self.font_small.render(
+                f'({x:+.1f}, {y:+.1f})', True, TEXT_DIM)
+            r = label.get_rect()
+            r.left = sx + 4 if anchor[0] == 'left' else sx - r.width - 4
+            r.top = sy + 4 if anchor[1] == 'top' else sy - r.height - 4
+            self.screen.blit(label, r)
+
+    def _draw_trail(self, name, color):
+        pts = self.trails[name]
+        if len(pts) < 2:
+            return
+        screen_pts = [self.to_screen(x, y) for (x, y) in pts]
+        # Fade older points by drawing with progressively lighter color.
+        n = len(screen_pts)
+        for i in range(1, n):
+            alpha = i / n  # 0..1, recent = brighter
+            c = tuple(int(BG[k] * (1 - alpha) + color[k] * alpha) for k in range(3))
+            pygame.draw.line(self.screen, c, screen_pts[i - 1], screen_pts[i], 2)
+
+    def _draw_drone(self, name, sp_idx, x, y, z, stale):
+        color = STALE if stale else SPECIES_COLORS[sp_idx % len(SPECIES_COLORS)]
+        sx, sy = self.to_screen(x, y)
+        # Trail
+        if self.show_trails:
+            self._draw_trail(name, color)
+        # Circle
+        pygame.draw.circle(self.screen, color, (sx, sy), 11)
+        pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), 11, 1)
+        # Label
+        if self.show_labels:
+            txt = self.font.render(name, True,
+                                   TEXT_DIM if stale else TEXT_DARK)
+            self.screen.blit(txt, (sx + 14, sy - 8))
+        # Z bar (small vertical bar 14px right of the dot)
+        bar_x = sx + 22
+        bar_y0 = sy - 18
+        bar_h = 36
+        pygame.draw.rect(self.screen, Z_BAR_BG,
+                         (bar_x, bar_y0, 5, bar_h))
+        z_norm = max(0.0, min(1.0, z / self.Z_MAX))
+        z_pix = int(bar_h * z_norm)
+        pygame.draw.rect(self.screen, color,
+                         (bar_x, bar_y0 + bar_h - z_pix, 5, z_pix))
+
+    def _draw_status(self, fps, n_recv, n_total, stale_names):
+        pygame.draw.rect(self.screen, STATUS_BG,
+                         (0, 0, self.window_w, self.status_h))
+        parts = [
+            f"{fps:5.1f} FPS",
+            f"poses {n_recv}/{n_total}",
+        ]
+        if stale_names:
+            parts.append(f"STALE: {', '.join(sorted(stale_names))}")
+        x = 14
+        for txt in parts:
+            surf = self.font_status.render(txt, True, STATUS_TEXT)
+            self.screen.blit(surf, (x, 10))
+            x += surf.get_width() + 30
+
+        keys = "T trails  L labels  G grid  C clear  ESC quit"
+        surf = self.font_small.render(keys, True, STATUS_TEXT)
+        self.screen.blit(surf, (self.window_w - surf.get_width() - 14, 12))
+
+    # ---------------- top-level frame ----------------
+
+    def draw(self, snap, fps):
+        now = time.monotonic()
+        self.screen.fill(BG)
+        if self.show_grid:
+            self._draw_grid()
+        self._draw_arena_box()
+        self._draw_axis_ticks()
+
+        n_recv = 0
+        stale_names = set()
+        for i, name in enumerate(self.names):
+            x, y, z, last_t = snap[name]
+            received = last_t > 0
+            stale = received and (now - last_t > self.STALE_AFTER)
+            if received:
+                n_recv += 1
+                # Update trail at most every render frame.
+                self.trails[name].append((x, y))
+            if stale:
+                stale_names.add(name)
+            self._draw_drone(name, self.species[i], x, y, z,
+                             stale=(not received) or stale)
+            if not received:
+                # Pin "waiting" badge over the drone start position guess.
+                pass
+
+        self._draw_status(fps, n_recv, len(self.names), stale_names)
+        pygame.display.flip()
+
+    # ---------------- key handlers ----------------
+
+    def handle_key(self, key):
+        if key == pygame.K_t:
+            self.show_trails = not self.show_trails
+        elif key == pygame.K_l:
+            self.show_labels = not self.show_labels
+        elif key == pygame.K_g:
+            self.show_grid = not self.show_grid
+        elif key == pygame.K_c:
+            for d in self.trails.values():
+                d.clear()
 
 
-def draw_arena_box(sim):
-    """Draw a black rectangle around the arena bounds for visual reference."""
-    p0 = sim.to_screen([0, 0])
-    p1 = sim.to_screen([ARENA_SIZE, ARENA_SIZE])
-    rect = pygame.Rect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1])
-    pygame.draw.rect(sim.screen, (0, 0, 0), rect, 2)
-
-
-def draw_drone_labels(sim, names):
-    """Draw drone name next to each particle."""
-    for i in range(sim.n):
-        x, y = sim.to_screen(sim.positions[i])
-        txt = sim.font.render(names[i], True, (50, 50, 50))
-        sim.screen.blit(txt, (x + 12, y - 8))
-
+# ---------------------------------------------------------------- driver
 
 def main():
-    # Choose drone roster: defaults to the 7-drone fleet from FLEET.md
-    drone_names = ['cf1', 'cf2', 'cf3', 'cf4', 'cf5', 'cf7', 'cf9']
-    assignments, n_species = load_species_config()
+    names, _ = load_drone_roster()
+    if not names:
+        print("[viewer] no enabled drones in crazyflies.yaml; nothing to show.")
+        return
+
+    species, n_species = load_species(names)
+    arena = load_arena()
 
     rclpy.init()
-    viewer = CFViewer(drone_names, assignments, n_species)
+    node = ViewerNode(names)
+    spin = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    spin.start()
 
-    # ROS spinning in a background thread; pygame on main thread
-    spin_thread = threading.Thread(
-        target=rclpy.spin, args=(viewer,), daemon=True
-    )
-    spin_thread.start()
-
-    sim = viewer.sim
-    pygame.display.set_caption("Crazyflie Particle Life Viewer")
+    renderer = Renderer(names, species, n_species, arena)
     clock = pygame.time.Clock()
+    target_fps = 60
 
     try:
-        running = True
-        while running:
+        while True:
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
-                    running = False
-                elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-                    running = False
+                    return
+                if ev.type == pygame.KEYDOWN:
+                    if ev.key in (pygame.K_ESCAPE, pygame.K_q):
+                        return
+                    renderer.handle_key(ev.key)
 
-            # Snapshot under lock, then render
-            with viewer.lock:
-                sim.screen.fill((255, 255, 255))
-                draw_arena_box(sim)
-                sim.draw_particles()
-                draw_drone_labels(sim, drone_names)
-                # Optional: draw centroid markers (helps see species clustering)
-                try:
-                    pts = sim.draw_centroid_spine()
-                    sim.draw_centroid_markers(pts)
-                except Exception:
-                    pass
-
-            pygame.display.flip()
-            clock.tick(60)
+            renderer.draw(node.snapshot(), fps=clock.get_fps())
+            clock.tick(target_fps)
     finally:
         pygame.quit()
-        viewer.destroy_node()
+        node.destroy_node()
         rclpy.shutdown()
 
 
